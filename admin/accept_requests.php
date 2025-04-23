@@ -7,77 +7,114 @@ if (!isset($_SESSION['id']) || $_SESSION['role'] !== 'admin') {
 
 include '../db_connect.php';
 
-// Get user details
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 $user_name = $_SESSION['name'] ?? 'Admin';
 $user_role = $_SESSION['role'] ?? 'Admin';
 
-// Accept logic
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['request_id'])) {
     $request_id = $_POST['request_id'];
-    $update = mysqli_query($conn, "UPDATE maintenance_requests SET status='accepted' WHERE id=$request_id");
-    if ($update) {
-        header("Location: accept_request.php?success=1");
+
+    $stmt = $conn->prepare("UPDATE maintenance_requests SET status='Accepted' WHERE id = ?");
+    $stmt->bind_param("i", $request_id);
+
+    if ($stmt->execute()) {
+        header("Location: assign_mechanic.php?id=$request_id");
         exit();
+    } else {
+        $error = "Failed to update request.";
     }
+    $stmt->close();
 }
 
-// 🟢 Updated query with JOIN to get name and contact
-$result = mysqli_query($conn, "
-    SELECT mr.id, mr.description, u.name AS user_name, u.contact AS user_contact 
+// Fetch all pending requests with user info
+$query = "
+    SELECT mr.id, mr.description, mr.preferred_date, mr.preferred_time,
+           u.name AS user_name, u.contact AS user_contact
     FROM maintenance_requests mr
     JOIN users u ON mr.user_id = u.id
-    WHERE mr.status='pending'
-");
+    WHERE mr.status = 'Pending'
+";
+$result = mysqli_query($conn, $query);
 ?>
 
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <meta charset="UTF-8">
     <title>Accept Requests - Admin Panel</title>
-    <link rel="stylesheet" href="../dashboard.css">
     <style>
-        .sidebar {
-            width: 240px;
-            height: 100vh;
-            background-color: #1e1e2f;
-            color: #fff;
-            position: fixed;
-            top: 0;
-            left: 0;
-            padding: 20px;
-            overflow-y: auto;
-            z-index: 100;
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            margin: 0; padding: 0;
+            background-color: #f4f6f9;
         }
+
+        .sidebar {
+            width: 240px; height: 100vh;
+            background-color: #1e1e2f;
+            color: #fff; position: fixed;
+            padding: 20px;
+        }
+
+        .sidebar h2 {
+            font-size: 22px;
+        }
+
+        .sidebar .profile {
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .sidebar .profile img {
+            width: 80px;
+        }
+
+        .sidebar ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        .sidebar ul li {
+            padding: 10px;
+            margin: 8px 0;
+            transition: background 0.3s ease;
+        }
+
         .sidebar ul li:hover {
-            background-color: #17a2b8;
+            background: #17a2b8;
+            border-radius: 5px;
+        }
+
+        .sidebar ul li a {
+            color: #fff; text-decoration: none;
+            display: block;
         }
 
         .main-content {
-            margin-left: 240px;
-            padding: 20px;
-            animation: fadeIn 0.4s ease-in-out;
-            background-color: #f4f6f9;
-            min-height: 100vh;
+            margin-left: 260px;
+            padding: 30px;
         }
 
         h2 {
             text-align: center;
-            margin-bottom: 20px;
             color: #2c3e50;
         }
 
         table {
             width: 100%;
-            background: #fff;
             border-collapse: collapse;
+            margin-top: 30px;
+            background-color: white;
             border-radius: 10px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
             overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
 
         th, td {
-            padding: 14px;
+            padding: 12px;
             text-align: center;
             border-bottom: 1px solid #ddd;
         }
@@ -95,29 +132,22 @@ $result = mysqli_query($conn, "
             background-color: #28a745;
             color: white;
             border: none;
-            padding: 8px 14px;
+            padding: 6px 12px;
             border-radius: 5px;
             cursor: pointer;
-            transition: background 0.3s ease;
         }
 
         .accept-btn:hover {
             background-color: #218838;
         }
 
-        .success-message {
-            background: #d4edda;
-            color: #155724;
-            padding: 12px;
-            border: 1px solid #c3e6cb;
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 10px;
             border-radius: 5px;
             text-align: center;
-            margin-bottom: 20px;
-        }
-
-        @keyframes fadeIn {
-            from {opacity: 0; transform: translateY(20px);}
-            to {opacity: 1; transform: translateY(0);}
+            margin: 15px 0;
         }
     </style>
     <script>
@@ -129,39 +159,27 @@ $result = mysqli_query($conn, "
 <body>
 
 <!-- Sidebar -->
-<div class="sidebar" id="sidebar">
-    <h2>Welcome, <?php echo ucfirst($user_role); ?></h2>
-    <div class="profile">
-        <img src="../img/car-service.png" alt="Profile" style="width:100px; height:auto;">
-        <p><?php echo htmlspecialchars($user_name); ?></p>
-    </div>
-    <ul>
-        <li><a href="dashboard.php">🏠 Home</a></li>
-        <li><a href="accept_request.php">✔️ Accept Requests</a></li>
-        <li><a href="assign_mechanic.php">👨‍🔧 Assign Mechanic</a></li>
-        <li><a href="notifications.php">🔔 Notifications</a></li>
-        <li><a href="billing.php">📄 Billing</a></li>
-        <li><a href="payment.php">💰 View Payments</a></li>
-        <li><a href="../logout.php">🚪 Logout</a></li>
-    </ul>
-</div>
+<?php include '../sidebar.php'; ?>
 
 <!-- Main Content -->
 <div class="main-content">
     <h2>Pending Maintenance Requests</h2>
 
-    <?php if (isset($_GET['success'])): ?>
-        <div class="success-message">✅ Request accepted successfully!</div>
+    <?php if (isset($error)): ?>
+        <div class="error-message"><?= $error ?></div>
     <?php endif; ?>
 
     <table>
         <tr>
             <th>ID</th>
             <th>User Name</th>
-            <th>Contact No.</th>
+            <th>Contact</th>
             <th>Description</th>
+            <th>Preferred Date</th>
+            <th>Preferred Time</th>
             <th>Action</th>
         </tr>
+
         <?php if (mysqli_num_rows($result) > 0): ?>
             <?php while ($row = mysqli_fetch_assoc($result)): ?>
                 <tr>
@@ -169,8 +187,10 @@ $result = mysqli_query($conn, "
                     <td><?= htmlspecialchars($row['user_name']) ?></td>
                     <td><?= htmlspecialchars($row['user_contact']) ?></td>
                     <td><?= htmlspecialchars($row['description']) ?></td>
+                    <td><?= $row['preferred_date'] ?></td>
+                    <td><?= $row['preferred_time'] ?></td>
                     <td>
-                        <form method="post" action="accept_request.php" onsubmit="return confirmAccept();">
+                        <form method="post" onsubmit="return confirmAccept();">
                             <input type="hidden" name="request_id" value="<?= $row['id'] ?>">
                             <button type="submit" class="accept-btn">Accept</button>
                         </form>
@@ -178,7 +198,7 @@ $result = mysqli_query($conn, "
                 </tr>
             <?php endwhile; ?>
         <?php else: ?>
-            <tr><td colspan="5">No pending requests found.</td></tr>
+            <tr><td colspan="7">No pending requests found.</td></tr>
         <?php endif; ?>
     </table>
 </div>

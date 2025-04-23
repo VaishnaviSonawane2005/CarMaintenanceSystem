@@ -38,7 +38,7 @@ h2 {
     color: #ff5c5c;
 }
 
-input {
+input, select {
     width: 100%;
     padding: 12px;
     margin: 8px 0;
@@ -50,7 +50,7 @@ input {
     transition: background-color 0.3s ease;
 }
 
-input:focus {
+input:focus, select:focus {
     background-color: #555;
 }
 
