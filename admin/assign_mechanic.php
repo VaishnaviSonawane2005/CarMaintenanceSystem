@@ -7,57 +7,77 @@ if (!isset($_SESSION['id']) || $_SESSION['role'] !== 'admin') {
 
 include '../db_connect.php';
 
-$user_name = $_SESSION['name'] ?? 'Admin';
-$user_role = $_SESSION['role'] ?? 'Admin';
-
-if (isset($_GET['id'])) {
-    $request_id = $_GET['id'];
-    // Fetch request details based on request_id
-    $request_query = "SELECT * FROM maintenance_requests WHERE id = ?";
-    $stmt = $conn->prepare($request_query);
-    $stmt->bind_param("i", $request_id);
-    $stmt->execute();
-    $request_result = $stmt->get_result();
-    $request = $request_result->fetch_assoc();
-    $stmt->close();
-
-    if ($request) {
-        // Fetch available mechanics for the preferred date and time
-        $mechanic_query = "
-            SELECT m.id, m.name, m.contact, ms.id AS slot_id, ms.available_date, ms.available_time
-            FROM mechanics m
-            JOIN mechanic_slots ms ON m.id = ms.mechanic_id
-            WHERE ms.available_date = ? AND ms.available_time = ? AND ms.status = 'available'
-        ";
-        $mechanic_stmt = $conn->prepare($mechanic_query);
-        $mechanic_stmt->bind_param("ss", $request['preferred_date'], $request['preferred_time']);
-        $mechanic_stmt->execute();
-        $mechanics_result = $mechanic_stmt->get_result();
-        $mechanic_stmt->close();
-    }
+// Get request ID
+$request_id = $_GET['id'] ?? null;
+if (!$request_id) {
+    die("No request ID provided.");
 }
 
-// Assign mechanic if form is submitted
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mechanic_id']) && isset($_POST['slot_id'])) {
-    $mechanic_id = $_POST['mechanic_id'];
-    $slot_id = $_POST['slot_id'];
+// Fetch preferred date and time for the maintenance request
+$stmt = mysqli_prepare($conn, "SELECT preferred_date, preferred_time FROM maintenance_requests WHERE id = ?");
+mysqli_stmt_bind_param($stmt, "i", $request_id);
+mysqli_stmt_execute($stmt);
+$result = mysqli_stmt_get_result($stmt);
 
-    // Update mechanic slot status to 'booked'
-    $update_slot_query = "UPDATE mechanic_slots SET status = 'booked' WHERE id = ?";
-    $update_stmt = $conn->prepare($update_slot_query);
-    $update_stmt->bind_param("i", $slot_id);
-    if ($update_stmt->execute()) {
-        // Assign mechanic to the maintenance request
-        $assign_mechanic_query = "UPDATE maintenance_requests SET mechanic_id = ? WHERE id = ?";
-        $assign_stmt = $conn->prepare($assign_mechanic_query);
-        $assign_stmt->bind_param("ii", $mechanic_id, $request_id);
-        $assign_stmt->execute();
+if (!$result || mysqli_num_rows($result) == 0) {
+    die("Maintenance request not found.");
+}
 
-        // Redirect to the dashboard or a confirmation page
-        header("Location: dashboard.php");
-        exit();
+$maintenance = mysqli_fetch_assoc($result);
+$preferred_date = $maintenance['preferred_date'];
+$preferred_time = $maintenance['preferred_time'];
+
+// Fetch available mechanics
+$mechanics_query = "
+SELECT u.id AS mechanic_id, u.name, u.contact, ms.date, ms.start_time, ms.end_time
+FROM users u
+JOIN mechanic_slots ms ON u.id = ms.mechanic_id
+WHERE u.role = 'mechanic'
+  AND ms.status = 'active'
+  AND ms.date = ?
+  AND ms.start_time <= ?
+  AND ms.end_time >= ?
+ORDER BY u.name, ms.start_time
+";
+$stmt2 = mysqli_prepare($conn, $mechanics_query);
+mysqli_stmt_bind_param($stmt2, "sss", $preferred_date, $preferred_time, $preferred_time);
+mysqli_stmt_execute($stmt2);
+$result2 = mysqli_stmt_get_result($stmt2);
+
+$mechanics = [];
+while ($row = mysqli_fetch_assoc($result2)) {
+    $mid = $row['mechanic_id'];
+    if (!isset($mechanics[$mid])) {
+        $mechanics[$mid] = [
+            'id' => $mid,
+            'name' => $row['name'],
+            'contact' => $row['contact'],
+            'slots' => []
+        ];
+    }
+    $mechanics[$mid]['slots'][] = sprintf("%s | %s - %s",
+        $row['date'],
+        date('h:i A', strtotime($row['start_time'])),
+        date('h:i A', strtotime($row['end_time']))
+    );
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $mechanic_id = $_POST['mechanic_id'] ?? null;
+    if ($mechanic_id) {
+        // Update both mechanic_id and status in a single query
+        $assign_sql = "UPDATE maintenance_requests SET mechanic_id = ?, status = 'Accepted', assigned = 'yes' WHERE id = ?";
+        $stmt3 = mysqli_prepare($conn, $assign_sql);
+        mysqli_stmt_bind_param($stmt3, "ii", $mechanic_id, $request_id);
+        if (mysqli_stmt_execute($stmt3)) {
+            header("Location: accept_requests.php?toast=assign_success");
+            exit();
+        } else {
+            header("Location: accept_requests.php?toast=assign_error");
+            exit();
+        }
     } else {
-        $error = "Failed to assign mechanic.";
+        echo "<script>alert('⚠️ Please select a mechanic.');</script>";
     }
 }
 ?>
@@ -66,176 +86,141 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mechanic_id']) && iss
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Assign Mechanic - Admin Panel</title>
-    <link rel="stylesheet" href="../dashboard.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Assign Mechanic</title>
     <style>
         body {
             font-family: 'Segoe UI', sans-serif;
-            margin: 0; padding: 0;
-            background-color: #f4f6f9;
-        }
-
-        .sidebar {
-            width: 240px; height: 100vh;
-            background-color: #1e1e2f;
-            color: #fff; position: fixed;
-            padding: 20px;
-        }
-
-        .sidebar h2 {
-            font-size: 22px;
-        }
-
-        .sidebar .profile {
-            text-align: center;
-            margin: 20px 0;
-        }
-
-        .sidebar .profile img {
-            width: 80px;
-        }
-
-        .sidebar ul {
-            list-style-type: none;
+            background: #f4f6f9;
+            margin: 0;
             padding: 0;
         }
-
-        .sidebar ul li {
-            padding: 10px;
-            margin: 8px 0;
-            transition: background 0.3s ease;
-        }
-
-        .sidebar ul li:hover {
-            background: #17a2b8;
-            border-radius: 5px;
-        }
-
-        .sidebar ul li a {
-            color: #fff; text-decoration: none;
-            display: block;
-        }
-
-        .main-content {
-            margin-left: 260px;
+        .container {
+            max-width: 800px;
+            margin: 70px auto;
             padding: 30px;
+            background: #fff;
+            border-radius: 15px;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+            animation: fadeIn 0.6s ease-in-out;
         }
-
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(30px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
         h2 {
             text-align: center;
             color: #2c3e50;
+            margin-bottom: 25px;
         }
-
-        table {
+        label {
+            font-size: 16px;
+            font-weight: 600;
+        }
+        select, button {
             width: 100%;
-            border-collapse: collapse;
-            margin-top: 30px;
-            background-color: white;
-            border-radius: 10px;
-            overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-
-        th, td {
             padding: 12px;
-            text-align: center;
-            border-bottom: 1px solid #ddd;
+            margin: 15px 0;
+            font-size: 16px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
         }
-
-        th {
-            background-color: #17a2b8;
-            color: white;
-        }
-
-        tr:hover {
-            background-color: #f1f1f1;
-        }
-
-        .assign-btn {
-            background-color: #28a745;
-            color: white;
+        button {
+            background: #28a745;
+            color: #fff;
             border: none;
-            padding: 6px 12px;
-            border-radius: 5px;
+            transition: background 0.3s ease;
             cursor: pointer;
         }
-
-        .assign-btn:hover {
-            background-color: #218838;
+        button:hover {
+            background: #218838;
         }
-
-        .error-message {
-            background: #f8d7da;
-            color: #721c24;
-            padding: 10px;
-            border-radius: 5px;
+        .slots-listing, .selected-mechanic-slots {
+            margin-top: 30px;
+        }
+        .mechanic-info {
+            background: #fdfdfd;
+            border-left: 5px solid #3498db;
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            animation: fadeSlide 0.5s ease forwards;
+            opacity: 0;
+            transform: translateY(10px);
+        }
+        @keyframes fadeSlide {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .mechanic-name {
+            font-weight: bold;
+            font-size: 17px;
+            color: #2c3e50;
+        }
+        .slots p {
+            margin: 4px 0;
+            color: #555;
+            font-size: 14px;
+        }
+        .no-mechanics {
             text-align: center;
-            margin: 15px 0;
+            color: #e74c3c;
+            font-size: 16px;
+            margin-top: 20px;
         }
     </style>
 </head>
 <body>
 
-<!-- Sidebar -->
-<div class="sidebar">
-    <h2>Admin Panel</h2>
-    <div class="profile">
-        <img src="../img/car-service.png" alt="Profile">
-        <p><?= htmlspecialchars($user_name); ?></p>
-    </div>
-    <ul>
-        <li><a href="dashboard.php">🏠 Dashboard</a></li>
-        <li><a href="accept_request.php">✔️ Accept Requests</a></li>
-        <li><a href="assign_mechanic.php">👨‍🔧 Assign Mechanic</a></li>
-        <li><a href="notifications.php">🔔 Notifications</a></li>
-        <li><a href="billing.php">📄 Billing</a></li>
-        <li><a href="payment.php">💰 Payments</a></li>
-        <li><a href="../logout.php">🚪 Logout</a></li>
-    </ul>
-</div>
+<div class="container">
+    <h2>Assign Mechanic</h2>
 
-<!-- Main Content -->
-<div class="main-content">
-    <h2>Assign Mechanic for Request #<?= $request_id ?></h2>
-
-    <?php if (isset($error)): ?>
-        <div class="error-message"><?= $error ?></div>
-    <?php endif; ?>
-
-    <p><strong>User Name:</strong> <?= htmlspecialchars($request['user_name']) ?></p>
-    <p><strong>Contact:</strong> <?= htmlspecialchars($request['user_contact']) ?></p>
-    <p><strong>Description:</strong> <?= htmlspecialchars($request['description']) ?></p>
-    <p><strong>Preferred Date:</strong> <?= $request['preferred_date'] ?></p>
-    <p><strong>Preferred Time:</strong> <?= $request['preferred_time'] ?></p>
-
-    <h3>Select Mechanic</h3>
-    <?php if (mysqli_num_rows($mechanics_result) > 0): ?>
-        <form method="POST">
-            <table>
-                <tr>
-                    <th>Name</th>
-                    <th>Contact</th>
-                    <th>Availability</th>
-                    <th>Action</th>
-                </tr>
-                <?php while ($mechanic = mysqli_fetch_assoc($mechanics_result)): ?>
-                    <tr>
-                        <td><?= htmlspecialchars($mechanic['name']) ?></td>
-                        <td><?= htmlspecialchars($mechanic['contact']) ?></td>
-                        <td><?= $mechanic['available_date'] . ' ' . $mechanic['available_time'] ?></td>
-                        <td>
-                            <input type="radio" name="mechanic_id" value="<?= $mechanic['id'] ?>" required>
-                            <input type="hidden" name="slot_id" value="<?= $mechanic['slot_id'] ?>">
-                        </td>
-                    </tr>
-                <?php endwhile; ?>
-            </table>
-            <button type="submit" class="assign-btn">Assign Mechanic</button>
-        </form>
+    <?php if (empty($mechanics)): ?>
+        <p class="no-mechanics">😔 No mechanics are available at the requested time slot.</p>
     <?php else: ?>
-        <p>No available mechanics at the selected time.</p>
+        <form action="assign_mechanic.php?id=<?= htmlspecialchars($request_id) ?>" method="POST">
+            <label for="mechanic_id">Select Mechanic:</label>
+            <select name="mechanic_id" id="mechanic_id" required onchange="showSlots(this.value)">
+                <option value="" disabled selected>-- Select Mechanic --</option>
+                <?php foreach ($mechanics as $mechanic): ?>
+                    <option value="<?= htmlspecialchars($mechanic['id']) ?>">
+                        <?= htmlspecialchars($mechanic['name']) ?> (<?= htmlspecialchars($mechanic['contact']) ?>)
+                    </option>
+                <?php endforeach; ?>
+            </select>
+            <div id="selected-slots" class="selected-mechanic-slots"></div>
+            <button type="submit">Assign Mechanic</button>
+        </form>
+
+        <div class="slots-listing">
+            <?php foreach ($mechanics as $mechanic): ?>
+                <div class="mechanic-info" id="mechanic-<?= htmlspecialchars($mechanic['id']) ?>" style="display:none;">
+                    <div class="mechanic-name"><?= htmlspecialchars($mechanic['name']) ?> (<?= htmlspecialchars($mechanic['contact']) ?>)</div>
+                    <div class="slots">
+                        <?php foreach ($mechanic['slots'] as $slot): ?>
+                            <p>📅 <?= htmlspecialchars($slot) ?></p>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
     <?php endif; ?>
+
 </div>
+
+<script>
+function showSlots(id) {
+    document.querySelectorAll('.mechanic-info').forEach(div => div.style.display = 'none');
+    if (id) {
+        const selectedDiv = document.getElementById('mechanic-' + id);
+        if (selectedDiv) {
+            selectedDiv.style.display = 'block';
+        }
+    }
+}
+</script>
 
 </body>
 </html>

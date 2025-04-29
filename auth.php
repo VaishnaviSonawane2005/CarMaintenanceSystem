@@ -3,15 +3,14 @@ session_start();
 $mysqli = new mysqli("localhost", "root", "", "car_maintenance_system");
 
 $alert = "";
+$alert_type = "";
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
-
     // LOGIN
     if (isset($_POST['login'])) {
         $email = trim($_POST['login_email']);
         $password = $_POST['login_password'];
 
-        // Try USERS table for admin, user, and mechanic
         $stmt = $mysqli->prepare("SELECT * FROM users WHERE email = ?");
         $stmt->bind_param("s", $email);
         $stmt->execute();
@@ -24,38 +23,41 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 $_SESSION['name'] = $user['name'];
                 $_SESSION['role'] = $user['role'];
 
-                // Redirect based on role
-                if ($_SESSION['role'] === 'admin') {
-                    header("Location: admin/dashboard.php");
-                } elseif ($_SESSION['role'] === 'mechanic') {
-                    header("Location: mechanic/dashboard.php");
-                } else {
-                    header("Location: user/dashboard.php");
-                }
-                exit();
+                $role_name = ucfirst($user['role']);
+                $alert = "🎉 Welcome back, {$user['name']}! Redirecting to {$role_name} Dashboard...";
+                $alert_type = "success";
+                
+                echo "<script>
+                    setTimeout(function() {
+                        window.location.href = '{$user['role']}/dashboard.php';
+                    }, 1500);
+                </script>";
             } else {
-                $alert = "❌ Invalid password!";
+                $alert = "❌ Invalid password! Please try again.";
+                $alert_type = "error";
             }
         } else {
             $alert = "❌ No account found with this email!";
+            $alert_type = "error";
         }
     }
 
-    // REGISTER
+    // REGISTER (Only for users)
     elseif (isset($_POST['register'])) {
         $name = trim($_POST['name']);
         $email = trim($_POST['email']);
         $password = $_POST['password'];
         $confirm = $_POST['confirm_password'];
         $contact = trim($_POST['contact']);
-        $role = $_POST['role']; // Role is dynamic for admin or mechanic
+        $role = 'user'; // Force role to 'user' for registration
 
         if ($password !== $confirm) {
             $alert = "⚠️ Passwords do not match!";
+            $alert_type = "warning";
         } elseif (strlen($password) < 6) {
             $alert = "⚠️ Password must be at least 6 characters!";
+            $alert_type = "warning";
         } else {
-            // Check if email already exists in the users table
             $check = $mysqli->prepare("SELECT * FROM users WHERE email = ?");
             $check->bind_param("s", $email);
             $check->execute();
@@ -63,17 +65,18 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
             if ($result->num_rows > 0) {
                 $alert = "❌ Email already exists!";
+                $alert_type = "error";
             } else {
                 $hashed = password_hash($password, PASSWORD_DEFAULT);
-
-                // Insert user data into users table
                 $stmt = $mysqli->prepare("INSERT INTO users (name, email, password, contact, role) VALUES (?, ?, ?, ?, ?)");
                 $stmt->bind_param("sssss", $name, $email, $hashed, $contact, $role);
 
                 if ($stmt->execute()) {
-                    $alert = "✅ Registration successful. Please login.";
+                    $alert = "✅ Registration successful! Please login with your credentials.";
+                    $alert_type = "success";
                 } else {
-                    $alert = "❌ Registration failed!";
+                    $alert = "❌ Registration failed! Please try again.";
+                    $alert_type = "error";
                 }
             }
         }
@@ -85,148 +88,119 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Login | Car Maintenance</title>
-    <style>
-        body {
-            font-family: 'Segoe UI', sans-serif;
-            background-color: #f4f6f9;
-            margin: 0;
-            padding: 0;
-        }
-        .container {
-            max-width: 500px;
-            background: #fff;
-            margin: 80px auto;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h2 {
-            text-align: center;
-            color: #333;
-        }
-        form label {
-            display: block;
-            margin: 12px 0 5px;
-            font-weight: bold;
-        }
-        form input {
-            width: 100%;
-            padding: 10px;
-            margin-bottom: 15px;
-            border-radius: 6px;
-            border: 1px solid #ccc;
-        }
-        .btn {
-            background: #17a2b8;
-            color: #fff;
-            padding: 10px 15px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            width: 100%;
-        }
-        .btn:hover {
-            background: #138496;
-        }
-        .alert {
-            background-color: #ffeeba;
-            color: #856404;
-            padding: 10px;
-            margin-bottom: 20px;
-            border-radius: 6px;
-            text-align: center;
-        }
-        .tabs {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 20px;
-        }
-        .tabs button {
-            flex: 1;
-            background-color: #e9ecef;
-            border: none;
-            padding: 10px;
-            cursor: pointer;
-        }
-        .tabs button.active {
-            background-color: #17a2b8;
-            color: #fff;
-        }
-        .form-section {
-            display: none;
-        }
-        .form-section.active {
-            display: block;
-        }
-    </style>
-    <script>
-        function showForm(form) {
-            document.querySelectorAll('.form-section').forEach(f => f.classList.remove('active'));
-            document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
-            document.getElementById(form).classList.add('active');
-            document.getElementById(form + "-btn").classList.add('active');
-        }
-
-        window.onload = () => {
-            showForm('login'); // Default view
-        };
-    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Car Maintenance System | Authentication</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
+    <link rel="stylesheet" href="style_auth.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
+    <div class="auth-container animate__animated animate__fadeIn">
+        <div class="auth-card">
+            <div class="auth-header">
+                <h1>Car Maintenance</h1>
+                <p>Keep your vehicle in perfect condition</p>
+            </div>
 
-<div class="container">
-    <h2>Car Maintenance System</h2>
+            <?php if (!empty($alert)): ?>
+                <div class="alert alert-<?php echo $alert_type; ?> animate__animated animate__fadeIn">
+                    <?php echo $alert; ?>
+                </div>
+            <?php endif; ?>
 
-    <?php if (!empty($alert)) echo "<div class='alert'>$alert</div>"; ?>
+            <div class="tabs">
+                <button id="login-btn" class="tab-btn active" onclick="showForm('login')">Login</button>
+                <button id="register-btn" class="tab-btn" onclick="showForm('register')">Register</button>
+                <div class="tab-indicator"></div>
+            </div>
 
-    <div class="tabs">
-        <button id="login-btn" onclick="showForm('login')">🔐 Login</button>
-        <button id="register-btn" onclick="showForm('register')">📝 Register</button>
+            <div class="form-container">
+                <!-- Login Form -->
+                <div class="form-section active" id="login">
+                    <form method="POST">
+                        <div class="input-group">
+                            <input type="email" name="login_email" placeholder="Email Address" required>
+                            <span class="input-icon"><i class="fas fa-envelope"></i></span>
+                        </div>
+                        <div class="input-group">
+                            <input type="password" name="login_password" placeholder="Password" required>
+                            <span class="input-icon"><i class="fas fa-lock"></i></span>
+                        </div>
+                        <button type="submit" name="login" class="btn btn-primary">
+                            <span>Login</span>
+                            <i class="fas fa-arrow-right"></i>
+                        </button>
+                    </form>
+                    <div class="form-footer">
+                        <p>Don't have an account? <a href="#" onclick="showForm('register')">Register here</a></p>
+                    </div>
+                </div>
+
+                <!-- Registration Form -->
+                <div class="form-section" id="register">
+                    <form method="POST">
+                        <div class="input-group">
+                            <input type="text" name="name" placeholder="Full Name" required>
+                            <span class="input-icon"><i class="fas fa-user"></i></span>
+                        </div>
+                        <div class="input-group">
+                            <input type="email" name="email" placeholder="Email Address" required>
+                            <span class="input-icon"><i class="fas fa-envelope"></i></span>
+                        </div>
+                        <div class="input-group">
+                            <input type="text" name="contact" placeholder="Contact Number" required>
+                            <span class="input-icon"><i class="fas fa-phone"></i></span>
+                        </div>
+                        <div class="input-group">
+                            <input type="password" name="password" placeholder="Password (min 6 characters)" required>
+                            <span class="input-icon"><i class="fas fa-lock"></i></span>
+                        </div>
+                        <div class="input-group">
+                            <input type="password" name="confirm_password" placeholder="Confirm Password" required>
+                            <span class="input-icon"><i class="fas fa-lock"></i></span>
+                        </div>
+                        <button type="submit" name="register" class="btn btn-primary">
+                            <span>Register</span>
+                            <i class="fas fa-user-plus"></i>
+                        </button>
+                    </form>
+                    <div class="form-footer">
+                        <p>Already have an account? <a href="#" onclick="showForm('login')">Login here</a></p>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <!-- Login Form -->
-    <div class="form-section" id="login">
-        <form method="POST">
-            <label for="login_email">Email</label>
-            <input type="email" name="login_email" required>
+    <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+    <script>
+        function showForm(form) {
+            // Update tabs
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.getElementById(form + '-btn').classList.add('active');
+            
+            // Update forms
+            document.querySelectorAll('.form-section').forEach(section => {
+                section.classList.remove('active');
+            });
+            document.getElementById(form).classList.add('active');
+            
+            // Move indicator
+            const indicator = document.querySelector('.tab-indicator');
+            const activeBtn = document.querySelector('.tab-btn.active');
+            indicator.style.width = `${activeBtn.offsetWidth}px`;
+            indicator.style.left = `${activeBtn.offsetLeft}px`;
+        }
 
-            <label for="login_password">Password</label>
-            <input type="password" name="login_password" required>
-
-            <button type="submit" name="login" class="btn">Login</button>
-        </form>
-    </div>
-
-    <!-- Registration Form -->
-    <div class="form-section" id="register">
-        <form method="POST">
-            <label for="name">Full Name</label>
-            <input type="text" name="name" required>
-
-            <label for="email">Email</label>
-            <input type="email" name="email" required>
-
-            <label for="contact">Contact Number</label>
-            <input type="text" name="contact" required>
-
-            <label for="password">Password</label>
-            <input type="password" name="password" required>
-
-            <label for="confirm_password">Confirm Password</label>
-            <input type="password" name="confirm_password" required>
-
-            <label for="role">Role</label>
-            <select name="role" required>
-                <option value="user">User</option>
-                <option value="mechanic">Mechanic</option>
-                <option value="admin">Admin</option>
-            </select>
-
-            <button type="submit" name="register" class="btn">Register</button>
-        </form>
-    </div>
-</div>
-
+        // Initialize tab indicator position
+        window.onload = function() {
+            const activeBtn = document.querySelector('.tab-btn.active');
+            const indicator = document.querySelector('.tab-indicator');
+            indicator.style.width = `${activeBtn.offsetWidth}px`;
+            indicator.style.left = `${activeBtn.offsetLeft}px`;
+        };
+    </script>
 </body>
 </html>

@@ -1,109 +1,236 @@
 <?php
 if (!isset($_SESSION)) session_start();
 $name = $_SESSION['name'] ?? 'Guest';
-$role = $_SESSION['role'] ?? 'user'; // fallback to user
+$role = $_SESSION['role'] ?? 'user';
 ?>
 
 <!-- Sidebar Component -->
 <div class="sidebar" id="sidebar">
-    <h2><?= ucfirst($role); ?> Panel</h2>
-    <div class="profile" style="text-align:center; margin:20px 0;">
-        <img src="images/profile.png" alt="Profile" style="width:70px; border-radius: 50%;">
-        <p><?= htmlspecialchars($name); ?></p>
+    <div class="sidebar-header">
+        <h2><?= ucfirst($role); ?> Panel</h2>
+        <div class="close-btn" onclick="toggleSidebar()">✕</div>
     </div>
-    <ul>
+    <div class="profile">
+        <div class="avatar-container">
+            <img src="images/profile.png" alt="Profile" class="avatar">
+            <div class="avatar-pulse"></div>
+        </div>
+        <p class="username"><?= htmlspecialchars($name); ?></p>
+        <div class="role-badge"><?= ucfirst($role); ?></div>
+    </div>
+    <ul class="nav-links">
         <?php if ($role === 'user'): ?>
-            <li><a href="user_dashboard.php">🏠 User Dashboard</a></li>
-            <li><a href="request_service.php">🛠️ Request Service</a></li>
-            <li><a href="schedule_service.php">📅 Schedule Service</a></li>
-            <li><a href="recent_requests.php">📨 My Notifications</a></li>
-            <li><a href="payment.php">💳 View Bills / Make Payment</a></li>
+            <li><a href="user_dashboard.php"><i class="fas fa-home"></i><span class="link-text">Dashboard</span></a></li>
+            <li><a href="request_service.php"><i class="fas fa-tools"></i><span class="link-text">Request Service</span></a></li>
+            <li><a href="schedule_service.php"><i class="fas fa-calendar-alt"></i><span class="link-text">Schedule Service</span></a></li>
+            <li><a href="notifications.php"><i class="fas fa-bell"></i><span class="link-text">Notifications</span><span class="notification-badge">3</span></a></li>
+            <li><a href="payment.php"><i class="fas fa-credit-card"></i><span class="link-text">Payments</span></a></li>
         <?php elseif ($role === 'admin'): ?>
-            <li><a href="accept_request.php">✔️ Accept Requests</a></li>
-            <li><a href="add_mechanic.php">➕ Add Mechanic</a></li>
-            <li><a href="view_requests.php">📋 View Requests</a></li>
+            <li><a href="accept_requests.php"><i class="fas fa-check-circle"></i><span class="link-text">Accept Requests</span></a></li>
+            <li><a href="add_mechanic.php"><i class="fas fa-user-plus"></i><span class="link-text">Add Mechanic</span></a></li>
+            <li><a href="view_requests.php"><i class="fas fa-clipboard-list"></i><span class="link-text">View Requests</span></a></li>
         <?php elseif ($role === 'mechanic'): ?>
-            <li><a href="mechanic_dashboard.php">🏠 Mechanic Dashboard</a></li>
-            <li><a href="assigned_tasks.php">📋 Assigned Tasks</a></li>
-            <li><a href="schedule.php">🗓 My Schedule</a></li>
+            <li><a href="mechanic_dashboard.php"><i class="fas fa-home"></i><span class="link-text">Dashboard</span></a></li>
+            <li><a href="assigned_tasks.php"><i class="fas fa-tasks"></i><span class="link-text">Assigned Tasks</span></a></li>
+            <li><a href="my_schedule.php"><i class="fas fa-calendar"></i><span class="link-text">My Schedule</span></a></li>
         <?php endif; ?>
-        <li><a href="logout.php">🚪 Logout</a></li>
+        <li class="logout-link"><a href="logout.php"><i class="fas fa-sign-out-alt"></i><span class="link-text">Logout</span></a></li>
     </ul>
 </div>
 
-<!-- Sidebar CSS Styling -->
 <style>
+    @import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css');
+    
     .sidebar {
         position: fixed;
         top: 0;
-        left: -250px;
-        width: 250px;
+        left: -300px;
+        width: 300px;
         height: 100%;
-        background-color: #2c3e50;
+        background: linear-gradient(135deg, #2c3e50 0%, #1a2530 100%);
         color: white;
-        padding-top: 20px;
-        transition: 0.3s;
+        padding: 20px 0;
+        transition: all 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
         z-index: 999;
+        box-shadow: 5px 0 25px rgba(0,0,0,0.2);
+        overflow-y: auto;
     }
-
+    
     .sidebar.active {
         left: 0;
     }
-
+    
+    .sidebar-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0 20px 20px;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    
     .sidebar h2 {
-        text-align: center;
-        margin-bottom: 20px;
-        font-size: 22px;
-    }
-
-    .sidebar .profile {
-        margin-bottom: 30px;
-    }
-
-    .sidebar .profile img {
-        width: 70px;
-        border-radius: 50%;
-        margin-bottom: 10px;
-    }
-
-    .sidebar .profile p {
         margin: 0;
-        font-weight: bold;
-        color: #ffffff;
+        font-size: 1.5rem;
+        background: linear-gradient(to right, #17a2b8, #28a745);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
     }
-
-    .sidebar ul {
-        list-style-type: none;
-        padding: 0;
+    
+    .close-btn {
+        font-size: 1.5rem;
+        cursor: pointer;
+        transition: transform 0.3s;
     }
-
-    .sidebar ul li {
-        padding: 15px;
+    
+    .close-btn:hover {
+        transform: rotate(90deg);
+        color: #ff5c5c;
+    }
+    
+    .profile {
         text-align: center;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        padding: 20px;
+        margin: 20px 0;
+        position: relative;
     }
-
-    .sidebar ul li a {
+    
+    .avatar-container {
+        position: relative;
+        width: 100px;
+        height: 100px;
+        margin: 0 auto 15px;
+    }
+    
+    .avatar {
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 3px solid #17a2b8;
+        position: relative;
+        z-index: 2;
+        transition: all 0.3s;
+    }
+    
+    .avatar-pulse {
+        position: absolute;
+        top: -5px;
+        left: -5px;
+        right: -5px;
+        bottom: -5px;
+        background: rgba(23, 162, 184, 0.5);
+        border-radius: 50%;
+        z-index: 1;
+        animation: pulse 2s infinite;
+    }
+    
+    .username {
+        font-size: 1.2rem;
+        margin: 10px 0 5px;
+        font-weight: bold;
+    }
+    
+    .role-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        background: #17a2b8;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+    }
+    
+    .nav-links {
+        list-style: none;
+        padding: 0 20px;
+    }
+    
+    .nav-links li {
+        margin-bottom: 5px;
+        position: relative;
+        overflow: hidden;
+        border-radius: 5px;
+        transition: all 0.3s;
+    }
+    
+    .nav-links li:before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: rgba(255,255,255,0.1);
+        transition: all 0.5s;
+    }
+    
+    .nav-links li:hover {
+        transform: translateX(10px);
+    }
+    
+    .nav-links li:hover:before {
+        left: 0;
+    }
+    
+    .nav-links a {
         color: white;
         text-decoration: none;
-        display: block;
-        transition: 0.3s;
+        display: flex;
+        align-items: center;
+        padding: 12px 15px;
+        position: relative;
+        z-index: 1;
     }
-
-    .sidebar ul li:hover {
-        background-color: #17a2b8;
+    
+    .nav-links i {
+        font-size: 1.2rem;
+        width: 30px;
+        transition: all 0.3s;
     }
-
-    .sidebar ul li a:hover {
-        color: #fff;
-        text-decoration: underline;
+    
+    .nav-links li:hover i {
+        transform: scale(1.2);
+        color: #17a2b8;
+    }
+    
+    .link-text {
+        margin-left: 10px;
+        transition: all 0.3s;
+    }
+    
+    .notification-badge {
+        background: #ff5c5c;
+        border-radius: 50%;
+        padding: 2px 6px;
+        font-size: 0.7rem;
+        margin-left: auto;
+    }
+    
+    .logout-link {
+        margin-top: 30px;
+        border-top: 1px solid rgba(255,255,255,0.1);
+        padding-top: 10px;
+    }
+    
+    .logout-link i {
+        color: #ff5c5c;
+    }
+    
+    @keyframes pulse {
+        0% { transform: scale(0.95); opacity: 0.7; }
+        70% { transform: scale(1.1); opacity: 0.3; }
+        100% { transform: scale(0.95); opacity: 0.7; }
     }
 </style>
 
-<!-- JavaScript for Sidebar Toggle -->
 <script>
-    // Toggle sidebar visibility
     function toggleSidebar() {
-        document.getElementById('sidebar').classList.toggle('active');
+        const sidebar = document.getElementById('sidebar');
+        sidebar.classList.toggle('active');
+        
+        // Toggle main content shift
+        const mainContent = document.querySelector('.main-content');
+        if (mainContent) {
+            mainContent.classList.toggle('shifted');
+        }
     }
 </script>
