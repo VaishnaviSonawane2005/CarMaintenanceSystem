@@ -2,6 +2,17 @@
 if (!isset($_SESSION)) session_start();
 $name = $_SESSION['name'] ?? 'Guest';
 $role = $_SESSION['role'] ?? 'user';
+
+// Get unread notification count for badge
+$notification_count = 0;
+if (isset($_SESSION['id'])) {
+    include '../db_connect.php';
+    $stmt = $conn->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0");
+    $stmt->bind_param("i", $_SESSION['id']);
+    $stmt->execute();
+    $notification_count = $stmt->get_result()->fetch_row()[0];
+    $stmt->close();
+}
 ?>
 
 <!-- Sidebar Component -->
@@ -23,16 +34,33 @@ $role = $_SESSION['role'] ?? 'user';
             <li><a href="user_dashboard.php"><i class="fas fa-home"></i><span class="link-text">Dashboard</span></a></li>
             <li><a href="request_service.php"><i class="fas fa-tools"></i><span class="link-text">Request Service</span></a></li>
             <li><a href="schedule_service.php"><i class="fas fa-calendar-alt"></i><span class="link-text">Schedule Service</span></a></li>
-            <li><a href="notifications.php"><i class="fas fa-bell"></i><span class="link-text">Notifications</span><span class="notification-badge">3</span></a></li>
+            <li><a href="notifications.php"><i class="fas fa-bell"></i><span class="link-text">Notifications</span>
+                <?php if ($notification_count > 0): ?>
+                    <span class="notification-badge"><?= min($notification_count, 9) . ($notification_count > 9 ? '+' : '') ?></span>
+                <?php endif; ?>
+            </a></li>
             <li><a href="payment.php"><i class="fas fa-credit-card"></i><span class="link-text">Payments</span></a></li>
+            <li><a href="payment_history.php"><i class="fas fa-history"></i><span class="link-text">Payment History</span></a></li>
+            
         <?php elseif ($role === 'admin'): ?>
+            <li><a href="admin_dashboard.php"><i class="fas fa-tachometer-alt"></i><span class="link-text">Dashboard</span></a></li>
             <li><a href="accept_requests.php"><i class="fas fa-check-circle"></i><span class="link-text">Accept Requests</span></a></li>
             <li><a href="add_mechanic.php"><i class="fas fa-user-plus"></i><span class="link-text">Add Mechanic</span></a></li>
-            <li><a href="view_requests.php"><i class="fas fa-clipboard-list"></i><span class="link-text">View Requests</span></a></li>
+            <li><a href="view_requests.php"><i class="fas fa-clipboard-list"></i><span class="link-text">Service Requests</span></a></li>
+            <li><a href="admin_payments.php"><i class="fas fa-money-bill-wave"></i><span class="link-text">Payment Records</span></a></li>
+            <li><a href="revenue_report.php"><i class="fas fa-chart-line"></i><span class="link-text">Revenue Report</span></a></li>
+            
         <?php elseif ($role === 'mechanic'): ?>
             <li><a href="mechanic_dashboard.php"><i class="fas fa-home"></i><span class="link-text">Dashboard</span></a></li>
             <li><a href="assigned_tasks.php"><i class="fas fa-tasks"></i><span class="link-text">Assigned Tasks</span></a></li>
             <li><a href="my_schedule.php"><i class="fas fa-calendar"></i><span class="link-text">My Schedule</span></a></li>
+            <li><a href="payment_request.php"><i class="fas fa-hand-holding-usd"></i><span class="link-text">Request Payments</span></a></li>
+            <li><a href="mechanic_earnings.php"><i class="fas fa-wallet"></i><span class="link-text">My Earnings</span></a></li>
+            <li><a href="notifications.php"><i class="fas fa-bell"></i><span class="link-text">Notifications</span>
+                <?php if ($notification_count > 0): ?>
+                    <span class="notification-badge"><?= min($notification_count, 9) . ($notification_count > 9 ? '+' : '') ?></span>
+                <?php endif; ?>
+            </a></li>
         <?php endif; ?>
         <li class="logout-link"><a href="logout.php"><i class="fas fa-sign-out-alt"></i><span class="link-text">Logout</span></a></li>
     </ul>

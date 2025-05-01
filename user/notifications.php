@@ -1,6 +1,6 @@
 <?php
 session_start();
-if (!isset($_SESSION['id'])) {
+if (!isset($_SESSION['id']) || $_SESSION['role'] !== 'user') {
     header("Location: ../auth.php");
     exit();
 }
@@ -8,47 +8,43 @@ if (!isset($_SESSION['id'])) {
 include '../db_connect.php';
 include '../toast.php';
 
-// Fetch all notifications for the current user
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+}
+
 $user_id = $_SESSION['id'];
-$query = "
-    SELECT 
-        n.id, 
-        n.request_id, 
-        n.type, 
-        n.message, 
-        n.created_at, 
-        n.is_read,
-        mr.status as request_status,
-        mr.mechanic_id,
-        u.name as mechanic_name,
-        u.contact as mechanic_contact,
-        ms.suggestion,
-        mr.preferred_date,
-        mr.preferred_time
-    FROM notifications n
-    LEFT JOIN maintenance_requests mr ON n.request_id = mr.id
-    LEFT JOIN users u ON mr.mechanic_id = u.id
-    LEFT JOIN mechanic_suggestions ms ON n.request_id = ms.request_id AND ms.mechanic_id = mr.mechanic_id
-    WHERE n.user_id = ?
-    ORDER BY n.created_at DESC
-";
+
+if (!isset($_GET['no_mark_read'])) {
+    $conn->query("UPDATE notifications SET is_read = 1 WHERE user_id = $user_id");
+}
+
+$query = "SELECT n.*, mr.status as request_status, mr.mechanic_id, 
+          u.name as mechanic_name, u.contact as mechanic_contact,
+          ms.suggestion, mr.preferred_date, mr.preferred_time, mr.description,
+          mr.requested_on as request_created, mr.updated_at as last_updated
+          FROM notifications n
+          LEFT JOIN maintenance_requests mr ON n.request_id = mr.id
+          LEFT JOIN users u ON mr.mechanic_id = u.id
+          LEFT JOIN mechanic_suggestions ms ON n.request_id = ms.request_id AND ms.mechanic_id = mr.mechanic_id
+          WHERE n.user_id = ?
+          ORDER BY n.is_read ASC, n.created_at DESC";
+
 $stmt = $conn->prepare($query);
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
+if (!$stmt) die("Error preparing query: " . $conn->error);
+if (!$stmt->bind_param("i", $user_id)) die("Error binding parameters: " . $stmt->error);
+if (!$stmt->execute()) die("Error executing query: " . $stmt->error);
+
 $result = $stmt->get_result();
 $notifications = $result->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
-// Mark all as read when page loads
-if (!empty($notifications)) {
-    $unread_ids = array_filter($notifications, fn($n) => !$n['is_read']);
-    if (!empty($unread_ids)) {
-        $update = $conn->prepare("UPDATE notifications SET is_read = 1 WHERE user_id = ?");
-        $update->bind_param("i", $user_id);
-        $update->execute();
-        $update->close();
-    }
-}
+$service_stages = ['Accepted', 'In Progress', 'Testing', 'Completed'];
+$stage_icons = [
+    'Accepted' => 'fa-check-circle',
+    'In Progress' => 'fa-tools',
+    'Testing' => 'fa-vial',
+    'Completed' => 'fa-check-double'
+];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -57,6 +53,7 @@ if (!empty($notifications)) {
     <title>Service Notifications</title>
     <link rel="stylesheet" href="../toast_styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
     <style>
         :root {
             --primary: #3498db;
@@ -65,22 +62,29 @@ if (!empty($notifications)) {
             --danger: #e74c3c;
             --dark: #2c3e50;
             --light: #ecf0f1;
+            --unread-bg: #f0f8ff;
         }
+        
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: #f5f7fa;
             margin: 0;
             padding: 0;
             color: #333;
+            transition: background 0.3s;
         }
+        
+        body.dark-mode {
+            background: #1a1a1a;
+            color: #f0f0f0;
+        }
+        
         .main-content {
             margin-left: 0;
             padding: 30px;
             transition: margin-left 0.3s;
         }
-        .sidebar.active ~ .main-content {
-            margin-left: 250px;
-        }
+        
         header {
             background: #2c3e50;
             color: white;
@@ -90,6 +94,11 @@ if (!empty($notifications)) {
             justify-content: space-between;
             margin-bottom: 30px;
         }
+        
+        body.dark-mode header {
+            background: #1e2a38;
+        }
+        
         #toggleBtn, #darkModeBtn {
             background: #17a2b8;
             color: white;
@@ -99,27 +108,36 @@ if (!empty($notifications)) {
             cursor: pointer;
             font-size: 16px;
         }
-        h1 {
-            margin: 0;
-            font-size: 24px;
-        }
+        
         .notification-container {
             max-width: 800px;
             margin: 0 auto;
         }
+        
         .notification-card {
             background: white;
             border-radius: 10px;
             box-shadow: 0 3px 10px rgba(0,0,0,0.08);
             margin-bottom: 20px;
             overflow: hidden;
-            transition: transform 0.3s, box-shadow 0.3s;
+            transition: all 0.3s;
             border-left: 4px solid var(--primary);
         }
-        .notification-card:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        
+        body.dark-mode .notification-card {
+            background: #2d2d2d;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.3);
         }
+        
+        .notification-card.unread {
+            background: var(--unread-bg);
+            border-left: 4px solid var(--primary);
+        }
+        
+        body.dark-mode .notification-card.unread {
+            background: #2a3a4a;
+        }
+        
         .notification-header {
             padding: 15px 20px;
             display: flex;
@@ -128,6 +146,12 @@ if (!empty($notifications)) {
             background: #f8f9fa;
             border-bottom: 1px solid #eee;
         }
+        
+        body.dark-mode .notification-header {
+            background: #252525;
+            border-color: #444;
+        }
+        
         .notification-title {
             font-weight: 600;
             font-size: 16px;
@@ -136,20 +160,25 @@ if (!empty($notifications)) {
             display: flex;
             align-items: center;
         }
-        .notification-title i {
-            margin-right: 10px;
+        
+        body.dark-mode .notification-title {
+            color: #f0f0f0;
         }
+        
         .notification-time {
             font-size: 13px;
             color: #7f8c8d;
         }
+        
         .notification-body {
             padding: 20px;
         }
+        
         .notification-message {
             margin: 0 0 15px 0;
             line-height: 1.6;
         }
+        
         .status-badge {
             display: inline-block;
             padding: 5px 10px;
@@ -158,62 +187,23 @@ if (!empty($notifications)) {
             font-weight: 600;
             margin-right: 10px;
         }
-        .badge-pending { background: #f39c12; color: white; }
+        
         .badge-accepted { background: #2ecc71; color: white; }
-        .badge-rejected { background: #e74c3c; color: white; }
         .badge-inprogress { background: #3498db; color: white; }
         .badge-testing { background: #9b59b6; color: white; }
         .badge-completed { background: #27ae60; color: white; }
-        .mechanic-details, .suggestion-box {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
-            margin-top: 15px;
-        }
-        .detail-row {
-            display: flex;
-            margin-bottom: 8px;
-        }
-        .detail-label {
-            font-weight: 600;
-            min-width: 120px;
-            color: #7f8c8d;
-        }
-        .detail-value {
-            flex: 1;
-        }
-        .suggestion-title {
-            font-weight: 600;
-            margin-bottom: 10px;
-            color: var(--dark);
-        }
-        .suggestion-text {
-            font-style: italic;
-            line-height: 1.6;
-        }
-        .no-notifications {
-            text-align: center;
-            padding: 50px 20px;
-            color: #7f8c8d;
-        }
-        .no-notifications i {
-            font-size: 50px;
-            margin-bottom: 20px;
-            color: #bdc3c7;
-        }
-        .unread {
-            background: #f0f8ff;
-            border-left: 4px solid var(--primary);
-        }
+        
         .progress-tracker {
             margin: 20px 0;
         }
+        
         .progress-steps {
             display: flex;
             justify-content: space-between;
             position: relative;
             margin-bottom: 20px;
         }
+        
         .progress-steps::before {
             content: '';
             position: absolute;
@@ -224,6 +214,11 @@ if (!empty($notifications)) {
             background: #e0e0e0;
             z-index: 0;
         }
+        
+        body.dark-mode .progress-steps::before {
+            background: #444;
+        }
+        
         .progress-bar {
             position: absolute;
             top: 50%;
@@ -233,56 +228,186 @@ if (!empty($notifications)) {
             z-index: 1;
             transition: width 0.5s ease;
         }
+        
         .step {
             position: relative;
             z-index: 2;
             text-align: center;
             width: 24%;
         }
+        
         .step-icon {
-            width: 30px;
-            height: 30px;
+            width: 40px;
+            height: 40px;
             background: #e0e0e0;
             border-radius: 50%;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            color: white;
-            font-size: 14px;
+            color: #555;
+            font-size: 18px;
             margin-bottom: 5px;
         }
+        
+        body.dark-mode .step-icon {
+            background-color: #444;
+            color: #ddd;
+        }
+        
         .step.active .step-icon {
             background: var(--primary);
+            color: white;
+            animation: pulse 2s infinite;
         }
+        
         .step.completed .step-icon {
             background: var(--success);
+            color: white;
         }
+        
         .step-label {
             font-size: 12px;
             color: #95a5a6;
         }
+        
+        body.dark-mode .step-label {
+            color: #aaa;
+        }
+        
         .step.active .step-label,
         .step.completed .step-label {
             color: var(--dark);
             font-weight: 600;
         }
         
-        @media (max-width: 768px) {
-            .main-content {
-                padding: 15px;
-            }
-            .sidebar.active ~ .main-content {
-                margin-left: 0;
-            }
-            .notification-header {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-            .notification-time {
-                margin-top: 5px;
-            }
+        body.dark-mode .step.active .step-label,
+        body.dark-mode .step.completed .step-label {
+            color: #f0f0f0;
         }
-        </style>
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(52, 152, 219, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(52, 152, 219, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(52, 152, 219, 0); }
+        }
+        
+        @keyframes celebration {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+        
+        .completed-celebration {
+            animation: celebration 1s ease;
+            color: var(--success);
+            display: inline-block;
+        }
+        
+        .section-title {
+            font-size: 18px;
+            margin: 20px 0 10px;
+            color: var(--dark);
+            border-bottom: 2px solid var(--primary);
+            padding-bottom: 5px;
+        }
+        
+        body.dark-mode .section-title {
+            color: #f0f0f0;
+        }
+        
+        .unread-section, .read-section {
+            margin-bottom: 30px;
+        }
+        
+        .celebration-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            animation: fadeIn 0.5s;
+        }
+        
+        .celebration-content {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            max-width: 500px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        
+        body.dark-mode .celebration-content {
+            background: #2d2d2d;
+        }
+        
+        .celebration-icon {
+            font-size: 60px;
+            color: var(--success);
+            margin-bottom: 20px;
+            animation: bounce 1s infinite alternate;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        @keyframes bounce {
+            from { transform: translateY(0); }
+            to { transform: translateY(-20px); }
+        }
+        
+        @keyframes float {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-20px); }
+            100% { transform: translateY(0px); }
+        }
+        
+        .floating-icons {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        
+        .floating-icon {
+            position: absolute;
+            font-size: 24px;
+            animation: float 3s infinite ease-in-out;
+            opacity: 0.8;
+        }
+        
+        .no-notifications {
+            text-align: center;
+            padding: 50px 20px;
+            color: #7f8c8d;
+        }
+        
+        .no-notifications i {
+            font-size: 50px;
+            margin-bottom: 20px;
+            color: #bdc3c7;
+        }
+        
+        .service-description {
+            margin: 15px 0;
+            padding: 10px;
+            background: #f0f8ff;
+            border-left: 3px solid var(--primary);
+            border-radius: 0 4px 4px 0;
+        }
+        
+        body.dark-mode .service-description {
+            background: #2a3a4a;
+        }
+    </style>
 </head>
 <body>
 <?php include '../sidebar.php'; ?>
@@ -303,187 +428,301 @@ if (!empty($notifications)) {
                 <h3>No notifications yet</h3>
                 <p>You'll see updates about your service requests here</p>
             </div>
-        <?php else: ?>
-            <?php foreach ($notifications as $notification): ?>
-                <div class="notification-card <?= $notification['is_read'] ? '' : 'unread' ?>">
-                    <div class="notification-header">
-                        <h3 class="notification-title">
-                            <?php 
-                            $icon = 'fa-info-circle';
-                            $color = 'var(--primary)';
-                            if ($notification['type'] === 'status_update') {
-                                $icon = 'fa-sync-alt';
-                                $color = 'var(--primary)';
-                            } elseif ($notification['type'] === 'assignment') {
-                                $icon = 'fa-user-cog';
-                                $color = 'var(--success)';
-                            } elseif ($notification['type'] === 'rejection') {
-                                $icon = 'fa-times-circle';
-                                $color = 'var(--danger)';
-                            } elseif ($notification['type'] === 'completion') {
-                                $icon = 'fa-check-circle';
-                                $color = 'var(--success)';
-                            }
-                            ?>
-                            <i class="fas <?= $icon ?>" style="color: <?= $color ?>"></i>
-                            <?= htmlspecialchars($notification['message']) ?>
-                        </h3>
-                        <span class="notification-time">
-                            <?= date('M j, Y g:i A', strtotime($notification['created_at'])) ?>
-                        </span>
-                    </div>
-                    <div class="notification-body">
-                        <p class="notification-message">
-                            <?php if ($notification['request_status']): ?>
-                                <span class="status-badge badge-<?= strtolower(str_replace(' ', '', $notification['request_status'])) ?>">
-                                    <?= $notification['request_status'] ?>
-                                </span>
-                            <?php endif; ?>
-                            Request ID: <?= $notification['request_id'] ?>
-                        </p>
-                        
-                        <div class="detail-row">
-                            <span class="detail-label">Scheduled Date:</span>
-                            <span class="detail-value"><?= $notification['preferred_date'] ?> at <?= date('h:i A', strtotime($notification['preferred_time'])) ?></span>
-                        </div>
-                        
-                        <?php if ($notification['request_status'] && in_array($notification['request_status'], ['Accepted', 'In Progress', 'Testing', 'Completed'])): ?>
-                            <div class="progress-tracker">
-                                <div class="progress-steps">
-                                    <div class="progress-bar" style="width: <?= 
-                                        $notification['request_status'] === 'Accepted' ? '25%' : 
-                                        ($notification['request_status'] === 'In Progress' ? '50%' : 
-                                        ($notification['request_status'] === 'Testing' ? '75%' : '100%')) 
-                                    ?>"></div>
-                                    <div class="step <?= $notification['request_status'] === 'Accepted' ? 'active' : ($notification['request_status'] === 'In Progress' || $notification['request_status'] === 'Testing' || $notification['request_status'] === 'Completed' ? 'completed' : '') ?>">
-                                        <div class="step-icon">
-                                            <i class="fas fa-check"></i>
-                                        </div>
-                                        <div class="step-label">Accepted</div>
-                                    </div>
-                                    <div class="step <?= $notification['request_status'] === 'In Progress' ? 'active' : ($notification['request_status'] === 'Testing' || $notification['request_status'] === 'Completed' ? 'completed' : '') ?>">
-                                        <div class="step-icon">
-                                            <i class="fas fa-tools"></i>
-                                        </div>
-                                        <div class="step-label">In Progress</div>
-                                    </div>
-                                    <div class="step <?= $notification['request_status'] === 'Testing' ? 'active' : ($notification['request_status'] === 'Completed' ? 'completed' : '') ?>">
-                                        <div class="step-icon">
-                                            <i class="fas fa-vial"></i>
-                                        </div>
-                                        <div class="step-label">Testing</div>
-                                    </div>
-                                    <div class="step <?= $notification['request_status'] === 'Completed' ? 'active completed' : '' ?>">
-                                        <div class="step-icon">
-                                            <i class="fas fa-flag-checkered"></i>
-                                        </div>
-                                        <div class="step-label">Completed</div>
-                                    </div>
-                                </div>
-                            </div>
-                        <?php endif; ?>
-                        
-                        <?php if ($notification['mechanic_id']): ?>
-                            <div class="mechanic-details">
-                                <div class="detail-row">
-                                    <span class="detail-label">Assigned Mechanic:</span>
-                                    <span class="detail-value"><?= htmlspecialchars($notification['mechanic_name']) ?></span>
-                                </div>
-                                <div class="detail-row">
-                                    <span class="detail-label">Contact:</span>
-                                    <span class="detail-value"><?= htmlspecialchars($notification['mechanic_contact']) ?></span>
-                                </div>
-                            </div>
-                        <?php endif; ?>
-                        
-                        <?php if ($notification['suggestion']): ?>
-                            <div class="suggestion-box">
-                                <div class="suggestion-title">Mechanic's Suggestions:</div>
-                                <div class="suggestion-text"><?= htmlspecialchars($notification['suggestion']) ?></div>
-                            </div>
-                        <?php endif; ?>
-                    </div>
+        <?php else: 
+            $unread = array_filter($notifications, fn($n) => !$n['is_read']);
+            $read = array_filter($notifications, fn($n) => $n['is_read']);
+            
+            if (!empty($unread)): ?>
+                <div class="unread-section">
+                    <h2 class="section-title">New Notifications</h2>
+                    <?php foreach ($unread as $notification): 
+                        renderNotification($notification, $service_stages, $stage_icons);
+                    endforeach; ?>
                 </div>
-            <?php endforeach; ?>
-        <?php endif; ?>
+            <?php endif;
+            
+            if (!empty($read)): ?>
+                <div class="read-section">
+                    <h2 class="section-title">Earlier Notifications</h2>
+                    <?php foreach ($read as $notification): 
+                        renderNotification($notification, $service_stages, $stage_icons);
+                    endforeach; ?>
+                </div>
+            <?php endif;
+        endif; ?>
     </div>
 </div>
 
+<?php
+function renderNotification($notification, $service_stages, $stage_icons) {
+    $current_stage = array_search($notification['request_status'], $service_stages);
+    $progress_percent = $current_stage !== false ? ($current_stage / (count($service_stages) - 1)) * 100 : 0;
+    ?>
+    <div class="notification-card <?= $notification['is_read'] ? '' : 'unread' ?>" data-request-id="<?= $notification['request_id'] ?>">
+        <div class="notification-header">
+            <h3 class="notification-title">
+                <i class="fas fa-<?= 
+                    $notification['type'] === 'status_update' ? 'sync-alt' : 
+                    ($notification['type'] === 'new_request' ? 'wrench' : 'bell')
+                ?>"></i>
+                <?= htmlspecialchars($notification['message']) ?>
+            </h3>
+            <span class="notification-time">
+                <?= date('M j, Y g:i A', strtotime($notification['created_at'])) ?>
+            </span>
+        </div>
+        
+        <div class="notification-body">
+            <?php if ($notification['request_status']): ?>
+                <p class="notification-message">
+                    <span class="status-badge badge-<?= strtolower(str_replace(' ', '', $notification['request_status'])) ?>">
+                        <?= $notification['request_status'] ?>
+                    </span>
+                    <?php if ($notification['request_status'] === 'Completed'): ?>
+                        <span class="completed-celebration">
+                            <i class="fas fa-check-double"></i> Service Completed
+                        </span>
+                    <?php endif; ?>
+                </p>
+            <?php endif; ?>
+            
+            <?php if ($notification['description']): ?>
+                <div class="service-description">
+                    <strong>Service Description:</strong> 
+                    <?= htmlspecialchars($notification['description']) ?>
+                </div>
+            <?php endif; ?>
+            
+            <?php if ($current_stage !== false): ?>
+                <div class="progress-tracker">
+                    <div class="progress-steps">
+                        <div class="progress-bar" style="width: <?= $progress_percent ?>%;"></div>
+                        <?php foreach ($service_stages as $index => $stage): 
+                            $step_class = '';
+                            if ($index < $current_stage) {
+                                $step_class = 'completed';
+                            } elseif ($index == $current_stage) {
+                                $step_class = 'active';
+                            }
+                        ?>
+                            <div class="step <?= $step_class ?>">
+                                <div class="step-icon">
+                                    <i class="fas <?= $stage_icons[$stage] ?>"></i>
+                                </div>
+                                <div class="step-label"><?= $stage ?></div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php
+}
+?>
+
 <script>
-// Function to toggle sidebar
 function toggleSidebar() {
     const sidebar = document.querySelector('.sidebar');
     sidebar.classList.toggle('active');
 }
 
-// Function to toggle dark mode
 function toggleDarkMode() {
     document.body.classList.toggle('dark-mode');
     localStorage.setItem('darkMode', document.body.classList.contains('dark-mode'));
-    
-    // Update button icon
-    const darkModeBtn = document.getElementById('darkModeBtn');
-    const icon = darkModeBtn.querySelector('i');
-    if (document.body.classList.contains('dark-mode')) {
-        icon.classList.remove('fa-moon');
-        icon.classList.add('fa-sun');
+    const icon = document.querySelector('#darkModeBtn i');
+    icon.classList.toggle('fa-moon');
+    icon.classList.toggle('fa-sun');
+}
+
+if (localStorage.getItem('darkMode') === 'true') {
+    document.body.classList.add('dark-mode');
+    const icon = document.querySelector('#darkModeBtn i');
+    icon.classList.replace('fa-moon', 'fa-sun');
+}
+
+function setupNotificationStream() {
+    if (typeof(EventSource) !== "undefined") {
+        const eventSource = new EventSource(`notifications_stream.php?user_id=<?= $user_id ?>`);
+        
+        eventSource.addEventListener('notification', function(e) {
+            const data = JSON.parse(e.data);
+            showNewNotification(data);
+            playNotificationSound();
+            showStatusToast('info', 'New update: ' + data.message);
+        });
+        
+        eventSource.addEventListener('status_update', function(e) {
+            const data = JSON.parse(e.data);
+            updateRequestStatus(data.request_id, data.status, data.message);
+            
+            // Show different toast based on status
+            if (data.status === 'Completed') {
+                showStatusToast('success', data.message);
+                showCompletionCelebration(data.message);
+            } else {
+                showStatusToast('info', 'Status updated: ' + data.message);
+            }
+        });
+        
+        eventSource.onerror = function() {
+            setTimeout(setupNotificationStream, 5000);
+        };
     } else {
-        icon.classList.remove('fa-sun');
-        icon.classList.add('fa-moon');
+        setInterval(checkForUpdates, 10000);
     }
 }
 
-// Check for saved dark mode preference
-if (localStorage.getItem('darkMode') === 'true') {
-    document.body.classList.add('dark-mode');
-    const darkModeBtn = document.getElementById('darkModeBtn');
-    const icon = darkModeBtn.querySelector('i');
-    icon.classList.remove('fa-moon');
-    icon.classList.add('fa-sun');
+function showNewNotification(notification) {
+    const container = document.querySelector('.unread-section') || 
+                     document.querySelector('.notification-container');
+    const html = `
+        <div class="notification-card unread" data-request-id="${notification.request_id}">
+            <div class="notification-header">
+                <h3 class="notification-title">
+                    <i class="fas fa-${notification.type === 'status_update' ? 'sync-alt' : 'wrench'}"></i>
+                    ${notification.message}
+                </h3>
+                <span class="notification-time">${new Date().toLocaleString()}</span>
+            </div>
+            <div class="notification-body">
+                <p class="notification-message">
+                    <span class="status-badge badge-${notification.status.toLowerCase().replace(' ', '')}">
+                        ${notification.status}
+                    </span>
+                </p>
+            </div>
+        </div>`;
+    
+    if (document.querySelector('.unread-section')) {
+        container.insertAdjacentHTML('afterbegin', html);
+    } else {
+        container.innerHTML = `
+            <div class="unread-section">
+                <h2 class="section-title">New Notifications</h2>
+                ${html}
+            </div>` + container.innerHTML;
+    }
 }
 
-// Real-time updates using EventSource
-if (typeof(EventSource) !== "undefined") {
-    const eventSource = new EventSource("notifications_stream.php?user_id=<?= $user_id ?>");
-    
-    eventSource.onmessage = function(event) {
-        const data = JSON.parse(event.data);
-        
-        if (data.update) {
-            // Show toast notification
-            createToast(data.type === 'new' ? 'info' : 'success', data.message, 5000);
-            
-            // Reload the page after a short delay to show new notifications
-            setTimeout(() => {
-                window.location.reload();
-            }, 2000);
+function updateRequestStatus(requestId, status, message) {
+    document.querySelectorAll(`[data-request-id="${requestId}"]`).forEach(card => {
+        // Update status badge
+        const badge = card.querySelector('.status-badge');
+        if (badge) {
+            badge.className = `status-badge badge-${status.toLowerCase().replace(' ', '')}`;
+            badge.textContent = status;
         }
-    };
-    
-    eventSource.onerror = function() {
-        console.log("EventSource failed.");
-        // Attempt to reconnect after 5 seconds
-        setTimeout(() => {
-            if (eventSource.readyState === EventSource.CLOSED) {
-                eventSource = new EventSource("notifications_stream.php?user_id=<?= $user_id ?>");
+        
+        // Add celebration for completed status
+        if (status === 'Completed') {
+            const msgContainer = card.querySelector('.notification-message') || 
+                                card.querySelector('.notification-body');
+            if (msgContainer) {
+                const celebration = document.createElement('span');
+                celebration.className = 'completed-celebration';
+                celebration.innerHTML = '<i class="fas fa-check-double"></i> Service Completed';
+                msgContainer.appendChild(celebration);
             }
-        }, 5000);
-    };
-} else {
-    console.log("Your browser doesn't support server-sent events.");
+        }
+    });
 }
 
-// Periodically check for updates (fallback)
-setInterval(() => {
+function showStatusToast(status, message) {
+    const type = status === 'Completed' ? 'success' : 
+                status === 'Rejected' ? 'error' : 'info';
+    createToast(type, message, 3000);
+}
+
+function showCompletionCelebration(message) {
+    // Create celebration overlay
+    const celebration = document.createElement('div');
+    celebration.className = 'celebration-container';
+    celebration.innerHTML = `
+        <div class="celebration-content">
+            <div class="celebration-icon">
+                <i class="fas fa-check-circle"></i>
+            </div>
+            <h2>Service Completed!</h2>
+            <p>${message}</p>
+            <button onclick="this.closest('.celebration-container').remove()" 
+                    style="margin-top: 20px; padding: 8px 20px; background: var(--success); color: white; border: none; border-radius: 4px; cursor: pointer;">
+                Great!
+            </button>
+        </div>
+        <div class="floating-icons" id="floating-icons"></div>
+    `;
+    
+    document.body.appendChild(celebration);
+    
+    // Add floating icons
+    const iconsContainer = document.getElementById('floating-icons');
+    const icons = ['fa-wrench', 'fa-car', 'fa-cog', 'fa-check', 'fa-tools', 'fa-bolt'];
+    
+    for (let i = 0; i < 20; i++) {
+        const icon = document.createElement('i');
+        icon.className = 'fas floating-icon ' + icons[Math.floor(Math.random() * icons.length)];
+        icon.style.left = Math.random() * 100 + '%';
+        icon.style.top = Math.random() * 100 + '%';
+        icon.style.color = `hsl(${Math.random() * 360}, 100%, 50%)`;
+        icon.style.animationDelay = Math.random() * 3 + 's';
+        iconsContainer.appendChild(icon);
+    }
+    
+    // Trigger confetti
+    confetti({
+        particleCount: 150,
+        spread: 70,
+        origin: { y: 0.6 }
+    });
+    
+    // Play celebration sound
+    playCelebration();
+    
+    // Auto-close after 8 seconds
+    setTimeout(() => {
+        celebration.remove();
+    }, 8000);
+}
+
+function playNotificationSound() {
+    const audio = new Audio('../sounds/notification.mp3');
+    audio.play().catch(e => console.log("Audio play failed:", e));
+}
+
+function playCelebration() {
+    const audio = new Audio('../sounds/celebration.mp3');
+    audio.play().catch(e => console.log("Celebration audio failed:", e));
+}
+
+function checkForUpdates() {
     fetch('check_notifications.php?user_id=<?= $user_id ?>')
         .then(response => response.json())
         .then(data => {
             if (data.new_notifications) {
-                createToast('info', 'You have new updates about your service requests', 3000);
                 window.location.reload();
             }
         });
-}, 30000); // Check every 30 seconds
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    setupNotificationStream();
+    
+    // Check for any completed services to celebrate
+    document.querySelectorAll('.badge-completed').forEach(badge => {
+        const card = badge.closest('.notification-card');
+        if (card && !card.querySelector('.completed-celebration')) {
+            const msgContainer = card.querySelector('.notification-message') || 
+                                card.querySelector('.notification-body');
+            if (msgContainer) {
+                const celebration = document.createElement('span');
+                celebration.className = 'completed-celebration';
+                celebration.innerHTML = '<i class="fas fa-check-double"></i> Service Completed';
+                msgContainer.appendChild(celebration);
+            }
+        }
+    });
+});
 </script>
 </body>
 </html>

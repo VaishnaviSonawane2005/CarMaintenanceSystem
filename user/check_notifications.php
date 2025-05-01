@@ -1,32 +1,28 @@
 <?php
 session_start();
-if (!isset($_SESSION['id'])) {
-    exit(json_encode(['new_notifications' => false]));
+if (!isset($_SESSION['id']) || $_SESSION['role'] !== 'user') {
+    header('HTTP/1.1 401 Unauthorized');
+    exit();
 }
 
 include '../db_connect.php';
 
-$user_id = $_GET['user_id'] ?? $_SESSION['id'];
-$last_check = $_GET['last_check'] ?? 0;
+$user_id = $_SESSION['id'];
+$last_check = $_GET['last_check'] ?? date('Y-m-d H:i:s', strtotime('-5 minutes'));
 
-// Check for new notifications with their types
-$query = "SELECT COUNT(*) as count, n.type 
-          FROM notifications n
-          WHERE n.user_id = ? AND n.created_at > FROM_UNIXTIME(?)
-          GROUP BY n.type";
+// Check for new notifications
+$query = "SELECT COUNT(*) as new_count FROM notifications 
+          WHERE user_id = ? AND created_at > ?";
 $stmt = $conn->prepare($query);
-$stmt->bind_param("ii", $user_id, $last_check);
+$stmt->bind_param("is", $user_id, $last_check);
 $stmt->execute();
 $result = $stmt->get_result();
+$row = $result->fetch_assoc();
 
-$updates = [];
-while ($row = $result->fetch_assoc()) {
-    $updates[$row['type']] = (int)$row['count'];
-}
-
+header('Content-Type: application/json');
 echo json_encode([
-    'new_notifications' => array_sum($updates) > 0,
-    'updates' => $updates,
-    'timestamp' => time()
+    'new_notifications' => $row['new_count'] > 0,
+    'count' => $row['new_count'],
+    'last_check' => date('Y-m-d H:i:s')
 ]);
 ?>
