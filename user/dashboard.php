@@ -1,10 +1,14 @@
 <?php
+// Start session with same configuration
+ini_set('session.gc_maxlifetime', 3600);
+session_set_cookie_params(3600, '/', '', false, true);
 session_start();
-if (!isset($_SESSION['id']) || $_SESSION['role'] !== 'user') {
+
+// Strict role checking for user dashboard
+if (!isset($_SESSION['id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'user') {
     header("Location: ../auth.php");
     exit();
 }
-
 include '../db_connect.php';
 
 $user_id = $_SESSION['id'];
@@ -53,6 +57,8 @@ if ($stmt) {
     $recent_requests = $result->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
 }
+
+$_SESSION['last_activity'] = time();
 ?>
 
 <!DOCTYPE html>

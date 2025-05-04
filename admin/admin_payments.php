@@ -187,35 +187,39 @@ $payments = $conn->query($query)->fetch_all(MYSQLI_ASSOC);
             </div>
         <?php else: ?>
             <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Service</th>
-                        <th>User</th>
-                        <th>Mechanic</th>
-                        <th>Amount</th>
-                        <th>Status</th>
-                        <th>Date</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($payments as $payment): ?>
-                        <tr>
-                            <td><?= $payment['id'] ?></td>
-                            <td><?= htmlspecialchars($payment['description']) ?></td>
-                            <td><?= htmlspecialchars($payment['user_name']) ?></td>
-                            <td><?= htmlspecialchars($payment['mechanic_name']) ?></td>
-                            <td class="amount-cell">₹<?= number_format($payment['amount'], 2) ?></td>
-                            <td>
-                                <span class="status-badge badge-<?= $payment['status'] ?>">
-                                    <?= ucfirst($payment['status']) ?>
-                                </span>
-                            </td>
-                            <td><?= date('M j, Y', strtotime($payment['created_at'])) ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Service</th>
+            <th>User</th>
+            <th>Mechanic</th>
+            <th>Amount</th>
+            <th>Status</th>
+            <th>Date</th>
+            <th>Payment Date</th>
+        </tr>
+    </thead>
+    <tbody>
+        <?php foreach ($payments as $payment): ?>
+            <tr>
+                <td><?= $payment['id'] ?></td>
+                <td><?= htmlspecialchars($payment['description']) ?></td>
+                <td><?= htmlspecialchars($payment['user_name']) ?></td>
+                <td><?= htmlspecialchars($payment['mechanic_name']) ?></td>
+                <td class="amount-cell">₹<?= number_format($payment['amount'], 2) ?></td>
+                <td>
+                    <span class="status-badge badge-<?= $payment['status'] ?>">
+                        <?= ucfirst($payment['status']) ?>
+                    </span>
+                </td>
+                <td><?= date('M j, Y', strtotime($payment['created_at'])) ?></td>
+                <td>
+                    <?= $payment['payment_date'] ? date('M j, Y h:i A', strtotime($payment['payment_date'])) : 'N/A' ?>
+                </td>
+            </tr>
+        <?php endforeach; ?>
+    </tbody>
+</table>
         <?php endif; ?>
     </div>
 </div>

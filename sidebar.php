@@ -62,7 +62,7 @@ if (isset($_SESSION['id'])) {
                 <?php endif; ?>
             </a></li>
         <?php endif; ?>
-        <li class="logout-link"><a href="logout.php"><i class="fas fa-sign-out-alt"></i><span class="link-text">Logout</span></a></li>
+        <li class="logout-link"><a href="../logout.php"><i class="fas fa-sign-out-alt"></i><span class="link-text">Logout</span></a></li>
     </ul>
 </div>
 

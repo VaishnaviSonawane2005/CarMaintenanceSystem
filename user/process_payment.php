@@ -10,7 +10,7 @@ include '../toast.php';
 
 // Verify CSRF token (recommended)
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !isset($_POST['payment_id'])) {
-    header("Location: payment.php?toast=invalid_request");
+    header("Location: payment.php?toast=invalid_request&sound=error");
     exit();
 }
 
@@ -23,7 +23,8 @@ $conn->begin_transaction();
 try {
     // Verify payment belongs to user and get details
     $query = "SELECT sp.id, sp.request_id, sp.mechanic_id, sp.amount, 
-              mr.description, u.name as mechanic_name
+              sp.base_amount, sp.tax_amount, sp.services_json,
+              mr.description, u.name as mechanic_name, u.contact as mechanic_contact
               FROM service_payments sp
               JOIN maintenance_requests mr ON sp.request_id = mr.id
               JOIN users u ON sp.mechanic_id = u.id
@@ -44,6 +45,7 @@ try {
     }
     
     $payment = $result->fetch_assoc();
+    $services = json_decode($payment['services_json'], true);
     
     // Process payment (in real app, integrate with payment gateway here)
     $update = $conn->prepare("UPDATE service_payments 
@@ -62,7 +64,7 @@ try {
     
     // Create notification for mechanic
     $message = "Payment of ₹" . number_format($payment['amount'], 2) . 
-               " received for service: " . $payment['description'];
+               " received for service #" . $payment['request_id'];
     
     $notif_stmt = $conn->prepare("INSERT INTO notifications 
                                  (user_id, request_id, type, message) 
@@ -74,9 +76,19 @@ try {
     $notif_stmt->bind_param("iis", $payment['mechanic_id'], $payment['request_id'], $message);
     $notif_stmt->execute();
     
-    // Create notification for user
-    $user_message = "Payment of ₹" . number_format($payment['amount'], 2) . 
-                   " processed for service #" . $payment['request_id'];
+    // Create notification for user with detailed receipt
+    $receipt = "Payment Receipt for Service #" . $payment['request_id'] . "\n";
+    $receipt .= "--------------------------------\n";
+    foreach ($services as $service) {
+        $receipt .= $service['name'] . ": ₹" . number_format($service['base_price'], 2) . "\n";
+    }
+    $receipt .= "--------------------------------\n";
+    $receipt .= "Subtotal: ₹" . number_format($payment['base_amount'], 2) . "\n";
+    $receipt .= "GST (18%): ₹" . number_format($payment['tax_amount'], 2) . "\n";
+    $receipt .= "Total: ₹" . number_format($payment['amount'], 2) . "\n";
+    $receipt .= "--------------------------------\n";
+    $receipt .= "Paid on: " . date('d M Y h:i A') . "\n";
+    $receipt .= "Mechanic: " . $payment['mechanic_name'] . " (" . $payment['mechanic_contact'] . ")";
     
     $user_notif = $conn->prepare("INSERT INTO notifications 
                                  (user_id, request_id, type, message) 
@@ -85,21 +97,21 @@ try {
         throw new Exception("Prepare failed: " . $conn->error);
     }
     
-    $user_notif->bind_param("iis", $user_id, $payment['request_id'], $user_message);
+    $user_notif->bind_param("iis", $user_id, $payment['request_id'], $receipt);
     $user_notif->execute();
     
     // Commit transaction
     $conn->commit();
     
     // Redirect with success message
-    header("Location: payment.php?toast=payment_success");
+    header("Location: payment.php?toast=payment_success&sound=success&payment_id=".$payment_id);
     exit();
     
 } catch (Exception $e) {
     // Rollback transaction on error
     $conn->rollback();
     error_log("Payment Error: " . $e->getMessage());
-    header("Location: payment.php?toast=payment_error");
+    header("Location: payment.php?toast=payment_error&sound=error&message=".urlencode($e->getMessage()));
     exit();
 }
 ?>

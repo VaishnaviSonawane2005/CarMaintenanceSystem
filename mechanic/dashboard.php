@@ -1,12 +1,19 @@
 <?php
+// Start session with same configuration
+ini_set('session.gc_maxlifetime', 3600);
+session_set_cookie_params(3600, '/', '', false, true);
 session_start();
-if (!isset($_SESSION['id']) || $_SESSION['role'] !== 'mechanic') {
+
+// Strict role checking for mechanic dashboard
+if (!isset($_SESSION['id']) || !isset($_SESSION['role']) || $_SESSION['role'] !== 'mechanic') {
     header("Location: ../auth.php");
     exit();
 }
 $mechanic_name = $_SESSION['name'];
 $mechanic_role = $_SESSION['role'];
 
+// Update last activity time
+$_SESSION['last_activity'] = time();
 ?>
 
 <!DOCTYPE html>

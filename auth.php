@@ -1,7 +1,16 @@
 <?php
+// Start session with proper configuration
+ini_set('session.gc_maxlifetime', 3600);
+session_set_cookie_params(3600, '/', '', false, true);
 session_start();
-$mysqli = new mysqli("localhost", "root", "", "car_maintenance_system");
 
+// Destroy any existing session if accessing login page directly
+if (basename($_SERVER['PHP_SELF']) === 'auth.php' && isset($_SESSION['id'])) {
+    session_unset();
+    session_destroy();
+}
+
+$mysqli = new mysqli("localhost", "root", "", "car_maintenance_system");
 $alert = "";
 $alert_type = "";
 
@@ -19,9 +28,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         if ($user_result->num_rows === 1) {
             $user = $user_result->fetch_assoc();
             if (password_verify($password, $user['password'])) {
+                // Regenerate session ID to prevent fixation
+                session_regenerate_id(true);
+                
+                // Set session variables
                 $_SESSION['id'] = $user['id'];
                 $_SESSION['name'] = $user['name'];
                 $_SESSION['role'] = $user['role'];
+                $_SESSION['last_activity'] = time();
+                $_SESSION['created'] = time();
 
                 $role_name = ucfirst($user['role']);
                 $alert = "🎉 Welcome back, {$user['name']}! Redirecting to {$role_name} Dashboard...";
@@ -93,6 +108,10 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
     <link rel="stylesheet" href="style_auth.css">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Add this meta tag to prevent caching -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
 </head>
 <body>
     <div class="auth-container animate__animated animate__fadeIn">
@@ -117,13 +136,13 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             <div class="form-container">
                 <!-- Login Form -->
                 <div class="form-section active" id="login">
-                    <form method="POST">
+                    <form method="POST" autocomplete="on">
                         <div class="input-group">
                             <input type="email" name="login_email" placeholder="Email Address" required>
                             <span class="input-icon"><i class="fas fa-envelope"></i></span>
                         </div>
                         <div class="input-group">
-                            <input type="password" name="login_password" placeholder="Password" required>
+                            <input type="password" name="login_password" placeholder="Password" required autocomplete="current-password">
                             <span class="input-icon"><i class="fas fa-lock"></i></span>
                         </div>
                         <button type="submit" name="login" class="btn btn-primary">
@@ -138,7 +157,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
                 <!-- Registration Form -->
                 <div class="form-section" id="register">
-                    <form method="POST">
+                    <form method="POST" autocomplete="on">
                         <div class="input-group">
                             <input type="text" name="name" placeholder="Full Name" required>
                             <span class="input-icon"><i class="fas fa-user"></i></span>
@@ -152,11 +171,11 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                             <span class="input-icon"><i class="fas fa-phone"></i></span>
                         </div>
                         <div class="input-group">
-                            <input type="password" name="password" placeholder="Password (min 6 characters)" required>
+                            <input type="password" name="password" placeholder="Password (min 6 characters)" required autocomplete="new-password">
                             <span class="input-icon"><i class="fas fa-lock"></i></span>
                         </div>
                         <div class="input-group">
-                            <input type="password" name="confirm_password" placeholder="Confirm Password" required>
+                            <input type="password" name="confirm_password" placeholder="Confirm Password" required autocomplete="new-password">
                             <span class="input-icon"><i class="fas fa-lock"></i></span>
                         </div>
                         <button type="submit" name="register" class="btn btn-primary">

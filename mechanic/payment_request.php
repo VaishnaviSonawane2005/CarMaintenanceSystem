@@ -10,18 +10,18 @@ include '../toast.php';
 
 $mechanic_id = $_SESSION['id'];
 
-// Service price list (in INR with tax included)
+// Service price list (base prices before tax)
 $service_prices = [
-    'Oil Change' => 1200,
-    'Brake Inspection' => 800,
-    'Engine Tune-Up' => 2500,
-    'Tire Rotation' => 600,
-    'Battery Check' => 500,
-    'AC Repair' => 3500,
-    'Suspension Issue' => 4200,
-    'Clutch Problem' => 3800,
-    'Lights Not Working' => 700,
-    'Other' => 1500 // Base price for other services
+    'Oil Change' => 1016.95,    // 1200 with 18% GST
+    'Brake Inspection' => 677.97,
+    'Engine Tune-Up' => 2118.64,
+    'Tire Rotation' => 508.47,
+    'Battery Check' => 423.73,
+    'AC Repair' => 2966.10,
+    'Suspension Issue' => 3559.32,
+    'Clutch Problem' => 3220.34,
+    'Lights Not Working' => 593.22,
+    'Other' => 1271.19 // Base price for other services
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['request_id'])) {
@@ -38,28 +38,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['request_id'])) {
         $user_id = $request['user_id'];
         $description = $request['description'];
         
-        // Determine service type and calculate amount
-        $service_type = 'Other';
-        $amount = $service_prices['Other'];
+        // Find all matching services in the description
+        $services_performed = [];
+        $base_amount = 0;
         
         foreach ($service_prices as $service => $price) {
             if (stripos($description, $service) !== false) {
-                $service_type = $service;
-                $amount = $price;
-                break;
+                $services_performed[] = [
+                    'name' => $service,
+                    'base_price' => $price,
+                    'tax' => $price * 0.18,
+                    'total' => $price * 1.18
+                ];
+                $base_amount += $price;
             }
         }
         
+        // If no specific services found, use "Other"
+        if (empty($services_performed)) {
+            $services_performed[] = [
+                'name' => 'Other',
+                'base_price' => $service_prices['Other'],
+                'tax' => $service_prices['Other'] * 0.18,
+                'total' => $service_prices['Other'] * 1.18
+            ];
+            $base_amount = $service_prices['Other'];
+        }
+        
+        $tax_amount = $base_amount * 0.18;
+        $total_amount = $base_amount + $tax_amount;
+        
         // Create payment request
-        $stmt = $conn->prepare("INSERT INTO service_payments (request_id, user_id, mechanic_id, amount) VALUES (?, ?, ?, ?)");
-        $stmt->bind_param("iiid", $request_id, $user_id, $mechanic_id, $amount);
+        $stmt = $conn->prepare("INSERT INTO service_payments (request_id, user_id, mechanic_id, amount, base_amount, tax_amount, services_json) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $services_json = json_encode($services_performed);
+        $stmt->bind_param("iiiddds", $request_id, $user_id, $mechanic_id, $total_amount, $base_amount, $tax_amount, $services_json);
         
         if ($stmt->execute()) {
             // Mark payment as requested
             $conn->query("UPDATE maintenance_requests SET payment_requested = 1 WHERE id = $request_id");
             
             // Create notification for user
-            $message = "Payment requested for service #$request_id (₹$amount)";
+            $message = "Payment requested for service #$request_id (₹" . number_format($total_amount, 2) . ")";
             $conn->query("INSERT INTO notifications (user_id, request_id, type, message) VALUES ($user_id, $request_id, 'payment', '$message')");
             
             header("Location: mechanic_dashboard.php?toast=payment_requested");
@@ -218,6 +237,34 @@ $stmt->close();
             margin-bottom: 20px;
             color: #bdc3c7;
         }
+        .bill-details {
+            margin-top: 15px;
+            border-top: 1px dashed #ccc;
+            padding-top: 15px;
+        }
+        .bill-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+        .bill-label {
+            font-weight: 600;
+        }
+        .bill-value {
+            text-align: right;
+        }
+        .bill-total {
+            font-weight: bold;
+            font-size: 18px;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 2px solid var(--primary);
+        }
+        .service-item {
+            margin-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+        }
     </style>
 </head>
 <body>
@@ -241,20 +288,66 @@ $stmt->close();
             </div>
         <?php else: ?>
             <?php foreach ($services as $service): 
-                $amount = $service_prices['Other'];
+                // Find all services performed for this request
+                $services_performed = [];
+                $base_amount = 0;
+                
                 foreach ($service_prices as $service_name => $price) {
                     if (stripos($service['description'], $service_name) !== false) {
-                        $amount = $price;
-                        break;
+                        $services_performed[] = [
+                            'name' => $service_name,
+                            'base_price' => $price,
+                            'tax' => $price * 0.18,
+                            'total' => $price * 1.18
+                        ];
+                        $base_amount += $price;
                     }
                 }
+                
+                // If no specific services found, use "Other"
+                if (empty($services_performed)) {
+                    $services_performed[] = [
+                        'name' => 'Other',
+                        'base_price' => $service_prices['Other'],
+                        'tax' => $service_prices['Other'] * 0.18,
+                        'total' => $service_prices['Other'] * 1.18
+                    ];
+                    $base_amount = $service_prices['Other'];
+                }
+                
+                $tax_amount = $base_amount * 0.18;
+                $total_amount = $base_amount + $tax_amount;
             ?>
                 <div class="service-card">
                     <div class="service-header">Service #<?= $service['id'] ?></div>
                     <div class="service-desc"><?= htmlspecialchars($service['description']) ?></div>
+                    
+                    <div class="bill-details">
+                        <h4>Service Breakdown:</h4>
+                        <?php foreach ($services_performed as $item): ?>
+                            <div class="service-item">
+                                <span><?= $item['name'] ?></span>
+                                <span>₹<?= number_format($item['total'], 2) ?></span>
+                            </div>
+                        <?php endforeach; ?>
+                        
+                        <div class="bill-row">
+                            <span class="bill-label">Subtotal:</span>
+                            <span class="bill-value">₹<?= number_format($base_amount, 2) ?></span>
+                        </div>
+                        <div class="bill-row">
+                            <span class="bill-label">GST (18%):</span>
+                            <span class="bill-value">₹<?= number_format($tax_amount, 2) ?></span>
+                        </div>
+                        <div class="bill-row bill-total">
+                            <span class="bill-label">Total Amount:</span>
+                            <span class="bill-value">₹<?= number_format($total_amount, 2) ?></span>
+                        </div>
+                    </div>
+                    
                     <form class="payment-form" method="POST">
                         <input type="hidden" name="request_id" value="<?= $service['id'] ?>">
-                        <div class="amount-display">₹<?= number_format($amount, 2) ?></div>
+                        <div class="amount-display">₹<?= number_format($total_amount, 2) ?></div>
                         <button type="submit" class="request-btn">
                             <i class="fas fa-rupee-sign"></i> Request Payment
                         </button>
@@ -264,12 +357,13 @@ $stmt->close();
         <?php endif; ?>
 
         <div class="price-list">
-            <h2><i class="fas fa-tags"></i> Service Price List</h2>
+            <h2><i class="fas fa-tags"></i> Service Price List (Excluding GST)</h2>
             <table>
                 <thead>
                     <tr>
                         <th>Service</th>
-                        <th>Price (INR)</th>
+                        <th>Base Price (INR)</th>
+                        <th>With GST (18%)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -277,13 +371,11 @@ $stmt->close();
                         <tr>
                             <td><?= $service ?></td>
                             <td>₹<?= number_format($price, 2) ?></td>
+                            <td>₹<?= number_format($price * 1.18, 2) ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
-            <p style="text-align: right; margin-top: 10px; font-style: italic;">
-                * All prices include 18% GST
-            </p>
         </div>
     </div>
 </div>
@@ -316,6 +408,30 @@ if (localStorage.getItem('darkMode') === 'true') {
     icon.classList.remove('fa-moon');
     icon.classList.add('fa-sun');
 }
+
+// Handle toast messages from URL parameters
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const toast = urlParams.get('toast');
+    
+    if (toast) {
+        switch(toast) {
+            case 'payment_requested':
+                createToast('success', 'Payment request sent successfully!');
+                break;
+            case 'payment_error':
+                createToast('error', 'Failed to send payment request. Please try again.');
+                break;
+            case 'invalid_request':
+                createToast('error', 'Invalid service request or already processed.');
+                break;
+        }
+        
+        // Remove toast parameter from URL
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, newUrl);
+    }
+});
 </script>
 </body>
 </html>

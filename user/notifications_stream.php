@@ -8,7 +8,17 @@ if (!isset($_SESSION['id']) || $_SESSION['role'] !== 'user') {
     die("event: error\ndata: {\"error\":\"unauthorized\"}\n\n");
 }
 
-include '../db_connect.php';
+// Include database connection with error handling
+try {
+    include '../db_connect.php';
+    
+    // Verify connection is established
+    if ($conn->connect_error) {
+        throw new Exception("Database connection failed: " . $conn->connect_error);
+    }
+} catch (Exception $e) {
+    die("event: error\ndata: " . json_encode(['error' => $e->getMessage()]) . "\n\n");
+}
 
 $user_id = $_GET['user_id'] ?? $_SESSION['id'];
 $last_event_id = $_SERVER['HTTP_LAST_EVENT_ID'] ?? 0;
@@ -26,6 +36,11 @@ ob_implicit_flush(true);
 
 try {
     while (true) {
+        // Check if connection is still alive
+        if (!$conn || $conn->ping() === false) {
+            throw new Exception("Database connection lost");
+        }
+
         // Check for new notifications
         $query = "SELECT n.id, n.message, n.type, n.created_at, n.request_id,
                  mr.status as request_status, mr.description, 
@@ -127,8 +142,13 @@ try {
     echo "event: error\ndata: " . json_encode(['error' => $e->getMessage()]) . "\n\n";
     if (ob_get_level()) ob_flush();
     flush();
+} finally {
+    // Clean up resources safely
+    if (isset($stmt)) {
+        $stmt->close();
+    }
+    if (isset($conn) && $conn) {
+        $conn->close();
+    }
 }
-
-// Clean up
-$conn->close();
 ?>

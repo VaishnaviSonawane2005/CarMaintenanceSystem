@@ -23,6 +23,14 @@ $stmt->bind_param("i", $user_id);
 $stmt->execute();
 $payments = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
+
+// Check for successful payment toast
+$payment_success = false;
+if (isset($_GET['toast'])) {
+    if ($_GET['toast'] === 'payment_success' && isset($_GET['payment_id'])) {
+        $payment_success = true;
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -149,7 +157,49 @@ $stmt->close();
             margin-bottom: 20px;
             color: #bdc3c7;
         }
-        </style>
+
+        .receipt-container {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .receipt-header {
+            text-align: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        .receipt-title {
+            font-size: 22px;
+            font-weight: bold;
+            color: var(--dark);
+        }
+        .receipt-subtitle {
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+        .receipt-service {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px dashed #eee;
+        }
+        .receipt-total {
+            font-weight: bold;
+            font-size: 18px;
+            margin-top: 15px;
+            padding-top: 10px;
+            border-top: 2px solid var(--primary);
+        }
+        .receipt-details {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #7f8c8d;
+        }
+    </style>
 </head>
 <body>
 <?php include '../sidebar.php'; ?>
@@ -164,6 +214,73 @@ $stmt->close();
     </header>
 
     <div class="payment-container">
+        <?php if ($payment_success): ?>
+            <div class="receipt-container">
+                <div class="receipt-header">
+                    <div class="receipt-title">Payment Successful</div>
+                    <div class="receipt-subtitle">Thank you for your payment</div>
+                </div>
+                
+                <?php 
+                // Get the successful payment details
+                $payment_id = (int)$_GET['payment_id'];
+                $query = "SELECT sp.*, mr.description, u.name as mechanic_name 
+                          FROM service_payments sp
+                          JOIN maintenance_requests mr ON sp.request_id = mr.id
+                          JOIN users u ON sp.mechanic_id = u.id
+                          WHERE sp.id = ?";
+                $stmt = $conn->prepare($query);
+                $stmt->bind_param("i", $payment_id);
+                $stmt->execute();
+                $payment = $stmt->get_result()->fetch_assoc();
+                $services = json_decode($payment['services_json'], true);
+                ?>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Service ID:</span>
+                    <span class="detail-value">#<?= $payment['request_id'] ?></span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Description:</span>
+                    <span class="detail-value"><?= htmlspecialchars($payment['description']) ?></span>
+                </div>
+                
+                <div style="margin: 20px 0;">
+                    <h4>Service Breakdown:</h4>
+                    <?php foreach ($services as $service): ?>
+                        <div class="receipt-service">
+                            <span><?= $service['name'] ?></span>
+                            <span>₹<?= number_format($service['base_price'], 2) ?></span>
+                        </div>
+                    <?php endforeach; ?>
+                    
+                    <div class="receipt-service">
+                        <span>Subtotal:</span>
+                        <span>₹<?= number_format($payment['base_amount'], 2) ?></span>
+                    </div>
+                    <div class="receipt-service">
+                        <span>GST (18%):</span>
+                        <span>₹<?= number_format($payment['tax_amount'], 2) ?></span>
+                    </div>
+                    <div class="receipt-service receipt-total">
+                        <span>Total Paid:</span>
+                        <span>₹<?= number_format($payment['amount'], 2) ?></span>
+                    </div>
+                </div>
+                
+                <div class="receipt-details">
+                    <div class="detail-row">
+                        <span class="detail-label">Payment Date:</span>
+                        <span class="detail-value"><?= date('d M Y h:i A', strtotime($payment['payment_date'])) ?></span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Mechanic:</span>
+                        <span class="detail-value"><?= htmlspecialchars($payment['mechanic_name']) ?></span>
+                    </div>
+                </div>
+            </div>
+        <?php endif; ?>
+
         <?php if (empty($payments)): ?>
             <div class="no-payments">
                 <i class="far fa-check-circle"></i>
@@ -171,13 +288,12 @@ $stmt->close();
                 <p>You don't have any outstanding payments at this time</p>
             </div>
         <?php else: ?>
-            <?php foreach ($payments as $payment): ?>
+            <?php foreach ($payments as $payment): 
+                $services = json_decode($payment['services_json'], true);
+            ?>
                 <div class="payment-card">
                     <div class="payment-header">
                         <h3 class="payment-title">Payment for Service #<?= $payment['request_id'] ?></h3>
-                        <span class="status-badge badge-<?= strtolower($payment['request_status']) ?>">
-                            <?= $payment['request_status'] ?>
-                        </span>
                     </div>
                     <div class="payment-body">
                         <div class="detail-row">
@@ -193,8 +309,26 @@ $stmt->close();
                             <span class="detail-value"><?= $payment['preferred_date'] ?> at <?= date('h:i A', strtotime($payment['preferred_time'])) ?></span>
                         </div>
                         
-                        <div class="amount-display">
-                            ₹<?= number_format($payment['amount'], 2) ?>
+                        <div style="margin: 15px 0; padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                            <h4 style="margin-top: 0; margin-bottom: 10px;">Bill Details:</h4>
+                            <?php foreach ($services as $service): ?>
+                                <div class="detail-row" style="margin-bottom: 5px;">
+                                    <span class="detail-label"><?= $service['name'] ?>:</span>
+                                    <span class="detail-value">₹<?= number_format($service['base_price'], 2) ?></span>
+                                </div>
+                            <?php endforeach; ?>
+                            <div class="detail-row" style="margin-top: 10px;">
+                                <span class="detail-label">Subtotal:</span>
+                                <span class="detail-value">₹<?= number_format($payment['base_amount'], 2) ?></span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="detail-label">GST (18%):</span>
+                                <span class="detail-value">₹<?= number_format($payment['tax_amount'], 2) ?></span>
+                            </div>
+                            <div class="detail-row" style="font-weight: bold; margin-top: 10px;">
+                                <span class="detail-label">Total Amount:</span>
+                                <span class="detail-value">₹<?= number_format($payment['amount'], 2) ?></span>
+                            </div>
                         </div>
                         
                         <form action="process_payment.php" method="POST" onsubmit="return confirmPayment()">
@@ -214,7 +348,7 @@ $stmt->close();
 function confirmPayment() {
     return confirm("Are you sure you want to proceed with this payment?");
 }
-// [Same JavaScript functions as in payment_request.php]
+
 function toggleSidebar() {
     document.querySelector('.sidebar').classList.toggle('active');
 }
@@ -242,6 +376,49 @@ if (localStorage.getItem('darkMode') === 'true') {
     icon.classList.remove('fa-moon');
     icon.classList.add('fa-sun');
 }
+
+// Handle toast messages from URL parameters
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const toast = urlParams.get('toast');
+    const sound = urlParams.get('sound');
+    
+    if (toast) {
+        let message = '';
+        let type = 'success';
+        
+        switch(toast) {
+            case 'payment_success':
+                message = 'Payment processed successfully!';
+                type = 'success';
+                break;
+            case 'payment_error':
+                message = urlParams.get('message') || 'Payment failed. Please try again.';
+                type = 'error';
+                break;
+            case 'invalid_request':
+                message = 'Invalid payment request';
+                type = 'error';
+                break;
+        }
+        
+        if (message) {
+            createToast(type, message);
+            
+            // Play sound if specified
+            if (sound) {
+                const audio = new Audio(sound === 'success' ? 
+                    'https://assets.mixkit.co/sfx/preview/mixkit-correct-answer-tone-2870.mp3' : 
+                    'https://assets.mixkit.co/sfx/preview/mixkit-wrong-answer-fail-notification-946.mp3');
+                audio.play();
+            }
+            
+            // Clean URL
+            const cleanUrl = window.location.pathname;
+            window.history.replaceState({}, document.title, cleanUrl);
+        }
+    }
+});
 </script>
 </body>
 </html>

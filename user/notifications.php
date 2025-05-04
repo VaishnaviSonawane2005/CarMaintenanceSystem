@@ -1,5 +1,9 @@
 <?php
+// Start session with proper configuration
+ini_set('session.gc_maxlifetime', 3600);
+session_set_cookie_params(3600, '/', '', false, true);
 session_start();
+
 if (!isset($_SESSION['id']) || $_SESSION['role'] !== 'user') {
     header("Location: ../auth.php");
     exit();
@@ -14,10 +18,12 @@ if ($conn->connect_error) {
 
 $user_id = $_SESSION['id'];
 
+// Mark notifications as read when page loads
 if (!isset($_GET['no_mark_read'])) {
     $conn->query("UPDATE notifications SET is_read = 1 WHERE user_id = $user_id");
 }
 
+// Fetch all notifications with detailed service information
 $query = "SELECT n.*, mr.status as request_status, mr.mechanic_id, 
           u.name as mechanic_name, u.contact as mechanic_contact,
           ms.suggestion, mr.preferred_date, mr.preferred_time, mr.description,
@@ -27,7 +33,10 @@ $query = "SELECT n.*, mr.status as request_status, mr.mechanic_id,
           LEFT JOIN users u ON mr.mechanic_id = u.id
           LEFT JOIN mechanic_suggestions ms ON n.request_id = ms.request_id AND ms.mechanic_id = mr.mechanic_id
           WHERE n.user_id = ?
-          ORDER BY n.is_read ASC, n.created_at DESC";
+          ORDER BY 
+            CASE WHEN mr.status = 'Completed' AND n.created_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR) THEN 0 ELSE 1 END,
+            n.is_read ASC, 
+            n.created_at DESC";
 
 $stmt = $conn->prepare($query);
 if (!$stmt) die("Error preparing query: " . $conn->error);
@@ -63,6 +72,7 @@ $stage_icons = [
             --dark: #2c3e50;
             --light: #ecf0f1;
             --unread-bg: #f0f8ff;
+            --highlight-bg: #fff9e6;
         }
         
         body {
@@ -71,7 +81,6 @@ $stage_icons = [
             margin: 0;
             padding: 0;
             color: #333;
-            transition: background 0.3s;
         }
         
         body.dark-mode {
@@ -82,7 +91,6 @@ $stage_icons = [
         .main-content {
             margin-left: 0;
             padding: 30px;
-            transition: margin-left 0.3s;
         }
         
         header {
@@ -93,10 +101,6 @@ $stage_icons = [
             align-items: center;
             justify-content: space-between;
             margin-bottom: 30px;
-        }
-        
-        body.dark-mode header {
-            background: #1e2a38;
         }
         
         #toggleBtn, #darkModeBtn {
@@ -120,7 +124,6 @@ $stage_icons = [
             box-shadow: 0 3px 10px rgba(0,0,0,0.08);
             margin-bottom: 20px;
             overflow: hidden;
-            transition: all 0.3s;
             border-left: 4px solid var(--primary);
         }
         
@@ -131,11 +134,12 @@ $stage_icons = [
         
         .notification-card.unread {
             background: var(--unread-bg);
-            border-left: 4px solid var(--primary);
         }
         
-        body.dark-mode .notification-card.unread {
-            background: #2a3a4a;
+        .notification-card.highlight {
+            background: var(--highlight-bg);
+            border-left: 4px solid var(--warning);
+            animation: highlight-pulse 2s ease-in-out;
         }
         
         .notification-header {
@@ -147,22 +151,12 @@ $stage_icons = [
             border-bottom: 1px solid #eee;
         }
         
-        body.dark-mode .notification-header {
-            background: #252525;
-            border-color: #444;
-        }
-        
         .notification-title {
             font-weight: 600;
             font-size: 16px;
-            color: var(--dark);
             margin: 0;
             display: flex;
             align-items: center;
-        }
-        
-        body.dark-mode .notification-title {
-            color: #f0f0f0;
         }
         
         .notification-time {
@@ -174,11 +168,6 @@ $stage_icons = [
             padding: 20px;
         }
         
-        .notification-message {
-            margin: 0 0 15px 0;
-            line-height: 1.6;
-        }
-        
         .status-badge {
             display: inline-block;
             padding: 5px 10px;
@@ -186,12 +175,13 @@ $stage_icons = [
             font-size: 12px;
             font-weight: 600;
             margin-right: 10px;
+            color: white;
         }
         
-        .badge-accepted { background: #2ecc71; color: white; }
-        .badge-inprogress { background: #3498db; color: white; }
-        .badge-testing { background: #9b59b6; color: white; }
-        .badge-completed { background: #27ae60; color: white; }
+        .badge-accepted { background: #2ecc71; }
+        .badge-inprogress { background: #3498db; }
+        .badge-testing { background: #9b59b6; }
+        .badge-completed { background: #27ae60; }
         
         .progress-tracker {
             margin: 20px 0;
@@ -291,16 +281,68 @@ $stage_icons = [
             100% { box-shadow: 0 0 0 0 rgba(52, 152, 219, 0); }
         }
         
-        @keyframes celebration {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.2); }
-            100% { transform: scale(1); }
+        @keyframes highlight-pulse {
+            0% { box-shadow: 0 0 10px rgba(243, 156, 18, 0.5); }
+            50% { box-shadow: 0 0 20px rgba(243, 156, 18, 0.8); }
+            100% { box-shadow: 0 0 10px rgba(243, 156, 18, 0.5); }
         }
         
         .completed-celebration {
             animation: celebration 1s ease;
             color: var(--success);
             display: inline-block;
+        }
+        
+        .no-notifications {
+            text-align: center;
+            padding: 50px 20px;
+            color: #7f8c8d;
+        }
+        
+        .service-description {
+            margin: 15px 0;
+            padding: 10px;
+            background: #f0f8ff;
+            border-left: 3px solid var(--primary);
+            border-radius: 0 4px 4px 0;
+        }
+        
+        body.dark-mode .service-description {
+            background: #2a3a4a;
+        }
+        
+        .new-completion-banner {
+            background: linear-gradient(135deg, #2ecc71, #27ae60);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .mechanic-suggestion {
+            margin: 15px 0;
+            padding: 10px;
+            background: #fff9e6;
+            border-left: 3px solid var(--warning);
+            border-radius: 0 4px 4px 0;
+        }
+        
+        body.dark-mode .mechanic-suggestion {
+            background: #3a3a2a;
+        }
+        
+        .mechanic-info {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .mechanic-info i {
+            font-size: 20px;
+            margin-right: 10px;
+            color: var(--primary);
         }
         
         .section-title {
@@ -315,97 +357,10 @@ $stage_icons = [
             color: #f0f0f0;
         }
         
-        .unread-section, .read-section {
-            margin-bottom: 30px;
-        }
-        
-        .celebration-container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            background: rgba(0,0,0,0.7);
-            z-index: 1000;
-            animation: fadeIn 0.5s;
-        }
-        
-        .celebration-content {
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            text-align: center;
-            max-width: 500px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-        }
-        
-        body.dark-mode .celebration-content {
-            background: #2d2d2d;
-        }
-        
-        .celebration-icon {
-            font-size: 60px;
-            color: var(--success);
-            margin-bottom: 20px;
-            animation: bounce 1s infinite alternate;
-        }
-        
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-        
-        @keyframes bounce {
-            from { transform: translateY(0); }
-            to { transform: translateY(-20px); }
-        }
-        
-        @keyframes float {
-            0% { transform: translateY(0px); }
-            50% { transform: translateY(-20px); }
-            100% { transform: translateY(0px); }
-        }
-        
-        .floating-icons {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-        }
-        
-        .floating-icon {
-            position: absolute;
-            font-size: 24px;
-            animation: float 3s infinite ease-in-out;
-            opacity: 0.8;
-        }
-        
-        .no-notifications {
-            text-align: center;
-            padding: 50px 20px;
-            color: #7f8c8d;
-        }
-        
-        .no-notifications i {
-            font-size: 50px;
-            margin-bottom: 20px;
-            color: #bdc3c7;
-        }
-        
-        .service-description {
-            margin: 15px 0;
-            padding: 10px;
-            background: #f0f8ff;
-            border-left: 3px solid var(--primary);
-            border-radius: 0 4px 4px 0;
-        }
-        
-        body.dark-mode .service-description {
-            background: #2a3a4a;
+        @keyframes celebration {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
         }
     </style>
 </head>
@@ -422,6 +377,22 @@ $stage_icons = [
     </header>
 
     <div class="notification-container">
+        <?php 
+        $recent_completions = array_filter($notifications, function($n) {
+            return $n['request_status'] === 'Completed' && 
+                   strtotime($n['created_at']) >= (time() - 3600);
+        });
+        
+        if (!empty($recent_completions)): ?>
+            <div class="new-completion-banner">
+                <i class="fas fa-check-circle"></i>
+                <div>
+                    <h3>Service Completed!</h3>
+                    <p>Your recent service request has been completed successfully</p>
+                </div>
+            </div>
+        <?php endif; ?>
+        
         <?php if (empty($notifications)): ?>
             <div class="no-notifications">
                 <i class="far fa-bell-slash"></i>
@@ -457,8 +428,13 @@ $stage_icons = [
 function renderNotification($notification, $service_stages, $stage_icons) {
     $current_stage = array_search($notification['request_status'], $service_stages);
     $progress_percent = $current_stage !== false ? ($current_stage / (count($service_stages) - 1)) * 100 : 0;
+    $is_recent_completion = $notification['request_status'] === 'Completed' && 
+                          strtotime($notification['created_at']) >= (time() - 3600);
     ?>
-    <div class="notification-card <?= $notification['is_read'] ? '' : 'unread' ?>" data-request-id="<?= $notification['request_id'] ?>">
+    <div class="notification-card <?= $notification['is_read'] ? '' : 'unread' ?> <?= $is_recent_completion ? 'highlight' : '' ?>" 
+         data-request-id="<?= $notification['request_id'] ?>"
+         data-status="<?= $notification['request_status'] ?>"
+         data-created="<?= strtotime($notification['created_at']) ?>">
         <div class="notification-header">
             <h3 class="notification-title">
                 <i class="fas fa-<?= 
@@ -469,6 +445,9 @@ function renderNotification($notification, $service_stages, $stage_icons) {
             </h3>
             <span class="notification-time">
                 <?= date('M j, Y g:i A', strtotime($notification['created_at'])) ?>
+                <?php if ($is_recent_completion): ?>
+                    <span style="color: var(--success);">(New!)</span>
+                <?php endif; ?>
             </span>
         </div>
         
@@ -490,6 +469,30 @@ function renderNotification($notification, $service_stages, $stage_icons) {
                 <div class="service-description">
                     <strong>Service Description:</strong> 
                     <?= htmlspecialchars($notification['description']) ?>
+                </div>
+            <?php endif; ?>
+            
+            <?php if ($notification['mechanic_name'] || $notification['suggestion']): ?>
+                <div class="mechanic-suggestion">
+                    <?php if ($notification['mechanic_name']): ?>
+                        <div class="mechanic-info">
+                            <i class="fas fa-user-cog"></i>
+                            <div>
+                                <strong>Mechanic:</strong> 
+                                <?= htmlspecialchars($notification['mechanic_name']) ?>
+                                <?php if ($notification['mechanic_contact']): ?>
+                                    (<?= htmlspecialchars($notification['mechanic_contact']) ?>)
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+                    
+                    <?php if ($notification['suggestion']): ?>
+                        <div>
+                            <strong>Mechanic's Suggestion:</strong>
+                            <p><?= htmlspecialchars($notification['suggestion']) ?></p>
+                        </div>
+                    <?php endif; ?>
                 </div>
             <?php endif; ?>
             
@@ -522,11 +525,17 @@ function renderNotification($notification, $service_stages, $stage_icons) {
 ?>
 
 <script>
+// DOM Elements
+const notificationContainer = document.querySelector('.notification-container');
+let firstLoad = true;
+
+// Function to toggle sidebar
 function toggleSidebar() {
     const sidebar = document.querySelector('.sidebar');
     sidebar.classList.toggle('active');
 }
 
+// Function to toggle dark mode
 function toggleDarkMode() {
     document.body.classList.toggle('dark-mode');
     localStorage.setItem('darkMode', document.body.classList.contains('dark-mode'));
@@ -535,37 +544,84 @@ function toggleDarkMode() {
     icon.classList.toggle('fa-sun');
 }
 
+// Check for saved dark mode preference
 if (localStorage.getItem('darkMode') === 'true') {
     document.body.classList.add('dark-mode');
     const icon = document.querySelector('#darkModeBtn i');
     icon.classList.replace('fa-moon', 'fa-sun');
 }
 
+// Function to highlight new notifications
+function highlightNewNotifications() {
+    const notifications = document.querySelectorAll('.notification-card');
+    const now = Math.floor(Date.now() / 1000);
+    
+    notifications.forEach(card => {
+        const created = parseInt(card.dataset.created);
+        const status = card.dataset.status;
+        
+        if ((status === 'Completed' && (now - created) < 3600) || card.classList.contains('unread')) {
+            card.classList.add('highlight');
+            setTimeout(() => card.classList.remove('highlight'), 5000);
+        }
+    });
+}
+
+// Function to show notification popup
+function showNotificationPopup(notification) {
+    const popup = document.createElement('div');
+    popup.className = 'notification-popup';
+    popup.innerHTML = `
+        <div class="popup-content">
+            <div class="popup-header">
+                <i class="fas fa-bell"></i>
+                <h3>New Notification</h3>
+                <button class="close-popup">&times;</button>
+            </div>
+            <div class="popup-body">
+                <p>${notification.message}</p>
+                <p class="popup-status">
+                    <span class="status-badge badge-${notification.status.toLowerCase().replace(' ', '')}">
+                        ${notification.status}
+                    </span>
+                </p>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(popup);
+    
+    popup.querySelector('.close-popup').addEventListener('click', () => {
+        popup.remove();
+    });
+    
+    setTimeout(() => popup.remove(), 5000);
+}
+
+// Function to play notification sound
+function playNotificationSound(type = 'default') {
+    const audio = new Audio(`../sounds/${type === 'completed' ? 'celebration.mp3' : 'notification.mp3'}`);
+    audio.play().catch(e => console.log("Audio play failed:", e));
+}
+
+// Function to setup notification stream
 function setupNotificationStream() {
     if (typeof(EventSource) !== "undefined") {
         const eventSource = new EventSource(`notifications_stream.php?user_id=<?= $user_id ?>`);
         
         eventSource.addEventListener('notification', function(e) {
             const data = JSON.parse(e.data);
-            showNewNotification(data);
-            playNotificationSound();
-            showStatusToast('info', 'New update: ' + data.message);
-        });
-        
-        eventSource.addEventListener('status_update', function(e) {
-            const data = JSON.parse(e.data);
-            updateRequestStatus(data.request_id, data.status, data.message);
+            showNotificationPopup(data);
+            playNotificationSound(data.status === 'Completed' ? 'completed' : 'default');
+            updateNotificationsUI(data);
             
-            // Show different toast based on status
             if (data.status === 'Completed') {
-                showStatusToast('success', data.message);
                 showCompletionCelebration(data.message);
-            } else {
-                showStatusToast('info', 'Status updated: ' + data.message);
             }
         });
         
         eventSource.onerror = function() {
+            console.log("SSE connection error. Reconnecting...");
             setTimeout(setupNotificationStream, 5000);
         };
     } else {
@@ -573,69 +629,45 @@ function setupNotificationStream() {
     }
 }
 
-function showNewNotification(notification) {
-    const container = document.querySelector('.unread-section') || 
-                     document.querySelector('.notification-container');
-    const html = `
-        <div class="notification-card unread" data-request-id="${notification.request_id}">
-            <div class="notification-header">
-                <h3 class="notification-title">
-                    <i class="fas fa-${notification.type === 'status_update' ? 'sync-alt' : 'wrench'}"></i>
-                    ${notification.message}
-                </h3>
-                <span class="notification-time">${new Date().toLocaleString()}</span>
-            </div>
-            <div class="notification-body">
-                <p class="notification-message">
-                    <span class="status-badge badge-${notification.status.toLowerCase().replace(' ', '')}">
-                        ${notification.status}
-                    </span>
-                </p>
-            </div>
-        </div>`;
+// Function to update notifications UI
+function updateNotificationsUI(notification) {
+    const notificationCard = document.createElement('div');
+    notificationCard.className = 'notification-card unread highlight';
+    notificationCard.dataset.requestId = notification.request_id;
+    notificationCard.dataset.status = notification.status;
+    notificationCard.dataset.created = Math.floor(Date.now() / 1000);
     
-    if (document.querySelector('.unread-section')) {
-        container.insertAdjacentHTML('afterbegin', html);
-    } else {
-        container.innerHTML = `
-            <div class="unread-section">
-                <h2 class="section-title">New Notifications</h2>
-                ${html}
-            </div>` + container.innerHTML;
+    notificationCard.innerHTML = `
+        <div class="notification-header">
+            <h3 class="notification-title">
+                <i class="fas fa-${notification.type === 'status_update' ? 'sync-alt' : 'wrench'}"></i>
+                ${notification.message}
+            </h3>
+            <span class="notification-time">Just now</span>
+        </div>
+        <div class="notification-body">
+            <p class="notification-message">
+                <span class="status-badge badge-${notification.status.toLowerCase().replace(' ', '')}">
+                    ${notification.status}
+                </span>
+                ${notification.status === 'Completed' ? 
+                    '<span class="completed-celebration"><i class="fas fa-check-double"></i> Service Completed</span>' : ''}
+            </p>
+        </div>
+    `;
+    
+    const unreadSection = document.querySelector('.unread-section') || 
+                         document.querySelector('.notification-container');
+    
+    if (unreadSection) {
+        unreadSection.insertBefore(notificationCard, unreadSection.firstChild);
     }
+    
+    setTimeout(() => notificationCard.classList.remove('highlight'), 5000);
 }
 
-function updateRequestStatus(requestId, status, message) {
-    document.querySelectorAll(`[data-request-id="${requestId}"]`).forEach(card => {
-        // Update status badge
-        const badge = card.querySelector('.status-badge');
-        if (badge) {
-            badge.className = `status-badge badge-${status.toLowerCase().replace(' ', '')}`;
-            badge.textContent = status;
-        }
-        
-        // Add celebration for completed status
-        if (status === 'Completed') {
-            const msgContainer = card.querySelector('.notification-message') || 
-                                card.querySelector('.notification-body');
-            if (msgContainer) {
-                const celebration = document.createElement('span');
-                celebration.className = 'completed-celebration';
-                celebration.innerHTML = '<i class="fas fa-check-double"></i> Service Completed';
-                msgContainer.appendChild(celebration);
-            }
-        }
-    });
-}
-
-function showStatusToast(status, message) {
-    const type = status === 'Completed' ? 'success' : 
-                status === 'Rejected' ? 'error' : 'info';
-    createToast(type, message, 3000);
-}
-
+// Function to show completion celebration
 function showCompletionCelebration(message) {
-    // Create celebration overlay
     const celebration = document.createElement('div');
     celebration.className = 'celebration-container';
     celebration.innerHTML = `
@@ -645,84 +677,179 @@ function showCompletionCelebration(message) {
             </div>
             <h2>Service Completed!</h2>
             <p>${message}</p>
-            <button onclick="this.closest('.celebration-container').remove()" 
-                    style="margin-top: 20px; padding: 8px 20px; background: var(--success); color: white; border: none; border-radius: 4px; cursor: pointer;">
-                Great!
-            </button>
+            <button class="celebration-btn">Great!</button>
         </div>
         <div class="floating-icons" id="floating-icons"></div>
     `;
     
     document.body.appendChild(celebration);
     
-    // Add floating icons
-    const iconsContainer = document.getElementById('floating-icons');
     const icons = ['fa-wrench', 'fa-car', 'fa-cog', 'fa-check', 'fa-tools', 'fa-bolt'];
+    const iconsContainer = document.getElementById('floating-icons');
     
     for (let i = 0; i < 20; i++) {
         const icon = document.createElement('i');
-        icon.className = 'fas floating-icon ' + icons[Math.floor(Math.random() * icons.length)];
-        icon.style.left = Math.random() * 100 + '%';
-        icon.style.top = Math.random() * 100 + '%';
+        icon.className = `fas floating-icon ${icons[Math.floor(Math.random() * icons.length)]}`;
+        icon.style.left = `${Math.random() * 100}%`;
+        icon.style.top = `${Math.random() * 100}%`;
         icon.style.color = `hsl(${Math.random() * 360}, 100%, 50%)`;
-        icon.style.animationDelay = Math.random() * 3 + 's';
+        icon.style.animationDelay = `${Math.random() * 3}s`;
         iconsContainer.appendChild(icon);
     }
     
-    // Trigger confetti
     confetti({
         particleCount: 150,
         spread: 70,
         origin: { y: 0.6 }
     });
     
-    // Play celebration sound
-    playCelebration();
-    
-    // Auto-close after 8 seconds
-    setTimeout(() => {
+    celebration.querySelector('.celebration-btn').addEventListener('click', () => {
         celebration.remove();
-    }, 8000);
+    });
+    
+    setTimeout(() => celebration.remove(), 8000);
 }
 
-function playNotificationSound() {
-    const audio = new Audio('../sounds/notification.mp3');
-    audio.play().catch(e => console.log("Audio play failed:", e));
-}
-
-function playCelebration() {
-    const audio = new Audio('../sounds/celebration.mp3');
-    audio.play().catch(e => console.log("Celebration audio failed:", e));
-}
-
-function checkForUpdates() {
-    fetch('check_notifications.php?user_id=<?= $user_id ?>')
-        .then(response => response.json())
-        .then(data => {
-            if (data.new_notifications) {
-                window.location.reload();
-            }
-        });
-}
-
+// Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
+    highlightNewNotifications();
     setupNotificationStream();
     
-    // Check for any completed services to celebrate
-    document.querySelectorAll('.badge-completed').forEach(badge => {
-        const card = badge.closest('.notification-card');
-        if (card && !card.querySelector('.completed-celebration')) {
-            const msgContainer = card.querySelector('.notification-message') || 
-                                card.querySelector('.notification-body');
-            if (msgContainer) {
-                const celebration = document.createElement('span');
-                celebration.className = 'completed-celebration';
-                celebration.innerHTML = '<i class="fas fa-check-double"></i> Service Completed';
-                msgContainer.appendChild(celebration);
-            }
-        }
-    });
+    if (firstLoad && document.querySelector('.notification-card.unread')) {
+        playNotificationSound();
+        firstLoad = false;
+    }
 });
+
+// Notification popup styles
+const popupStyles = document.createElement('style');
+popupStyles.textContent = `
+    .notification-popup {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        width: 300px;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        z-index: 1000;
+        animation: slideIn 0.5s ease-out;
+        overflow: hidden;
+    }
+    
+    body.dark-mode .notification-popup {
+        background: #2d2d2d;
+        color: white;
+    }
+    
+    .popup-content {
+        padding: 15px;
+    }
+    
+    .popup-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+    
+    .popup-header i {
+        font-size: 20px;
+        color: #3498db;
+        margin-right: 10px;
+    }
+    
+    .popup-header h3 {
+        margin: 0;
+        flex-grow: 1;
+    }
+    
+    .close-popup {
+        background: none;
+        border: none;
+        font-size: 20px;
+        cursor: pointer;
+        color: #7f8c8d;
+    }
+    
+    .popup-body {
+        padding: 10px 0;
+    }
+    
+    .popup-status {
+        margin-top: 10px;
+    }
+    
+    .celebration-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        background: rgba(0,0,0,0.7);
+        z-index: 1000;
+        animation: fadeIn 0.5s;
+    }
+    
+    .celebration-content {
+        background: white;
+        padding: 30px;
+        border-radius: 10px;
+        text-align: center;
+        max-width: 500px;
+        box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    }
+    
+    body.dark-mode .celebration-content {
+        background: #2d2d2d;
+    }
+    
+    .celebration-icon {
+        font-size: 60px;
+        color: var(--success);
+        margin-bottom: 20px;
+        animation: bounce 1s infinite alternate;
+    }
+    
+    .floating-icons {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+    }
+    
+    .floating-icon {
+        position: absolute;
+        font-size: 24px;
+        animation: float 3s infinite ease-in-out;
+        opacity: 0.8;
+    }
+    
+    @keyframes slideIn {
+        from { transform: translateX(100%); }
+        to { transform: translateX(0); }
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+    
+    @keyframes bounce {
+        from { transform: translateY(0); }
+        to { transform: translateY(-20px); }
+    }
+    
+    @keyframes float {
+        0% { transform: translateY(0px); }
+        50% { transform: translateY(-20px); }
+        100% { transform: translateY(0px); }
+    }
+`;
+document.head.appendChild(popupStyles);
 </script>
 </body>
 </html>
